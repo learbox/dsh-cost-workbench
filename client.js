@@ -1877,6 +1877,8 @@ const WB_CALC = {
               return 'cost'
             }
           })
+          /** 用户在本会话里手动切过模式？切过就尊重手动选择，不再按工作区类型覆盖。 */
+          const [modeTouched, setModeTouched] = React.useState(false)
           React.useEffect(() => {
             try {
               window.localStorage.setItem('dsh-cost-workbench.mode', mode)
@@ -1884,6 +1886,12 @@ const WB_CALC = {
               // 隐私模式下写不了 localStorage 也不影响使用。
             }
           }, [mode])
+          // 工作区类型决定默认模式：造价项目 → 造价模式；普通/未标记 → 普通模式
+          React.useEffect(() => {
+            if (projectInfo === null || modeTouched) return
+            const isProject = typeof projectInfo.project === 'string' && projectInfo.project !== ''
+            setMode(isProject ? 'cost' : 'lite')
+          }, [projectInfo, modeTouched])
 
           /** 消费之后强制取一次用量（平时不轮询）。 */
           const refreshUsage = React.useCallback(() => {
@@ -1941,9 +1949,11 @@ const WB_CALC = {
           React.useEffect(() => {
             let alive = true
             const id = typeof props.sessionId === 'string' ? props.sessionId : ''
-            api('/context', { method: 'POST', body: { sessionId: id } }).then(              (data) => {
+            api('/context', { method: 'POST', body: { sessionId: id } }).then(
+              (data) => {
                 if (!alive) return
                 setProjectInfo(data)
+                setModeTouched(false)
                 setReloadKey((value) => value + 1)
               },
               () => { if (alive) setProjectInfo(null) },
@@ -2158,7 +2168,7 @@ const WB_CALC = {
               type: 'button',
               className: 'dsh-wb-badge-btn',
               title: t('mode.hint'),
-              onClick: () => setMode((value) => (value === 'cost' ? 'lite' : 'cost')),
+              onClick: () => { setModeTouched(true); setMode((value) => (value === 'cost' ? 'lite' : 'cost')) },
             },
               h('span', null, mode === 'cost' ? t('mode.cost') : t('mode.lite')),
             ),
