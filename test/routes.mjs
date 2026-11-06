@@ -95,6 +95,8 @@ try {
     recordingsDir: '会议记录',
     dataDir,
     glossaryFile,
+    // 隔离真实用户配置：否则 ~/.dsh-workbench/config.json 会覆盖测试的临时库路径
+    userConfigFile: join(tmp.dir, 'user-config.json'),
     // 故意给一个不存在的打开命令：验证 open_failed 分支，同时避免测试真的去拉起 Obsidian。
     openCommand: '__missing_open_command__',
     // 同理：文件夹选择器用不存在的命令，避免测试弹出系统对话框。

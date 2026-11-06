@@ -4164,6 +4164,148 @@ function CalcCard({ t }) {
           )
         }
 
+        /* -------------------------------------------------- 设置页（总设置） */
+
+        /**
+         * 设置 → 造价工作台。
+         * 读写与工作台面板同一套接口（GET/PUT /config、POST /pick-folder），
+         * 保存后 Host 原地重建，不需要重启；面板里的首次引导保留为兜底入口。
+         */
+        function CostSettingsSection({ close }) {
+          ensureStyles()
+          const t = makeT(useLanguage())
+          const [status, setStatus] = React.useState({ state: 'loading' })
+          const [draft, setDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录' })
+          const [busy, setBusy] = React.useState(false)
+          const [pickerBusy, setPickerBusy] = React.useState(false)
+          const [flash, setFlash] = React.useState(null)
+
+          React.useEffect(() => {
+            let alive = true
+            api('/config').then(
+              (data) => {
+                if (!alive) return
+                setStatus({ state: 'ready' })
+                setDraft({
+                  vaultRoot: data.vaultRoot ?? '',
+                  sopDir: data.sopDir ?? '00 资料库',
+                  recordingsDir: data.recordingsDir ?? '会议记录',
+                })
+              },
+              (error) => { if (alive) setStatus({ state: 'error', message: error.message }) },
+            )
+            return () => { alive = false }
+          }, [])
+
+          React.useEffect(() => {
+            if (flash === null) return undefined
+            const timer = setTimeout(() => setFlash(null), 3200)
+            return () => clearTimeout(timer)
+          }, [flash])
+
+          const pick = () => {
+            setPickerBusy(true)
+            setFlash(null)
+            api('/pick-folder', { method: 'POST', body: {} }).then(
+              (data) => {
+                if (typeof data.path === 'string' && data.path !== '') {
+                  setDraft((current) => ({ ...current, vaultRoot: data.path }))
+                  if (data.created === true) setFlash('已选择并创建目录：' + data.path)
+                } else if (data.cancelled === true) {
+                  setFlash('已取消选择')
+                }
+              },
+              (error) => setFlash('打开文件夹选择器失败：' + error.message),
+            ).finally(() => setPickerBusy(false))
+          }
+
+          const save = () => {
+            const vaultRoot = String(draft.vaultRoot ?? '').trim()
+            if (vaultRoot === '') {
+              setFlash('请先填写路径，或点「选择…」挑一个文件夹')
+              return
+            }
+            setBusy(true)
+            setFlash(null)
+            api('/config', { method: 'PUT', body: { ...draft, vaultRoot } }).then(
+              (data) => {
+                if (data.configured === true) {
+                  setStatus({ state: 'ready' })
+                  setFlash('已保存；工作台立即生效，不用重启')
+                } else {
+                  setFlash('保存后仍未生效，请检查路径后重试')
+                }
+              },
+              (error) => setFlash('保存失败：' + error.message),
+            ).finally(() => setBusy(false))
+          }
+
+          const field = (labelText, value, onChange, append) => h('div', { style: { marginTop: '12px' } },
+            h('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '5px' } }, labelText),
+            h('div', { style: { display: 'flex', gap: '6px' } },
+              h('input', {
+                className: 'dsh-wb-input',
+                style: { flex: '1 1 auto', minWidth: '0' },
+                value,
+                onChange: (event) => onChange(event.target.value),
+              }),
+              append ?? null,
+            ),
+          )
+
+          if (status.state === 'loading') return h('div', { className: 'dsh-wb-loading' }, t('panel.loading'))
+          if (status.state === 'error') {
+            return h('div', { className: 'dsh-wb-error' }, t('panel.error') + '：' + status.message)
+          }
+
+          return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': '14px', padding: '2px 2px 18px' } },
+            h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
+              h('h2', { style: { margin: 0, fontSize: '17px' } }, '造价工作台'),
+              h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, '会话右侧栏的资料库与造价工具'),
+            ),
+            h('p', { className: 'dsh-wb-note', style: { marginTop: '6px' } },
+              '这里配置工作台读写哪个 Obsidian 库。保存后立即生效，不需要重启；会话里首次打开工作台时也会先问一次。'),
+            flash !== null ? h('div', { className: 'dsh-wb-error', style: { marginTop: '10px' } }, flash) : null,
+            h('div', { className: 'dsh-wb-card', style: { marginTop: '12px', padding: '14px 16px' } },
+              field(
+                '笔记文件夹的完整路径（Obsidian 库，或任意文件夹）',
+                draft.vaultRoot,
+                (value) => setDraft((current) => ({ ...current, vaultRoot: value })),
+                h('button', {
+                  type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary',
+                  disabled: pickerBusy, style: { flex: 'none' }, onClick: pick,
+                }, pickerBusy ? '选择中…' : '选择…'),
+              ),
+              field('资料库子目录（相对库根目录）', draft.sopDir, (value) => setDraft((current) => ({ ...current, sopDir: value }))),
+              field('录音存放子目录', draft.recordingsDir, (value) => setDraft((current) => ({ ...current, recordingsDir: value }))),
+              h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
+                h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),
+                h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => { if (typeof close === 'function') close() } }, '关闭'),
+              ),
+            ),
+            h('p', { className: 'dsh-wb-note', style: { marginTop: '10px' } },
+              '路径不存在时保存会自动创建目录。所有数据只留在你自己的电脑上。'),
+          )
+        }
+
+        ctx.slots.inject('settings.section', () => {
+          try {
+            return ctx.slots.register({ name: 'settings.section', id: 'dsh-cost-workbench', order: 55, label: '造价工作台' }, CostSettingsSection)
+          } catch (error) {
+            console.warn('[dsh-workbench] 设置分区注册失败：', error instanceof Error ? error.message : String(error))
+            return () => {}
+          }
+        })
+
+        ctx.slots.inject('settings.section.icon', () => {
+          try {
+            return ctx.slots.register({ name: 'settings.section.icon', id: 'dsh-cost-workbench' }, ({ size }) => h(Icon, { size }))
+          } catch (error) {
+            console.warn('[dsh-workbench] 设置图标注册失败：', error instanceof Error ? error.message : String(error))
+            return () => {}
+          }
+        })
+
         ctx.slots.inject('sidebar.right.pane.tab', () => {
           try {
             return ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, WorkbenchPanel)

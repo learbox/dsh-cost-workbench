@@ -1,6 +1,6 @@
 # 维护者说明
 
-这个插件怎么改、改哪里、改完怎么验。用户文档在 `README.md` / `README.zh.md`，这里只记维护者需要的东西。
+这个插件怎么改、改哪里、改完怎么验。用户文档在 `README.md`（中文，GitHub 默认）与 `README.en.md`（英文），这里只记维护者需要的东西。
 
 ## 目录布局
 
@@ -71,6 +71,8 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |
+| `settings.section` | id `dsh-cost-workbench` | 「设置」新增一个造价工作台分区（库路径/子目录，组件收到 `{ close }`） |
+| `settings.section.icon` | id `dsh-cost-workbench` | 上一条导航行的图标（id 必须一致） |
 
 客户端标识（slot id、`TAB_ID`、`TAB_KIND`）仍是 `dsh-workbench` 前缀，与包名 `dsh-cost-workbench`、
 patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已保存的面板状态失效。改之前先读 `client.js`
@@ -112,6 +114,7 @@ patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已�
 |---|---|
 | `cards.json` / `prompts.json` / 术语表 / 三张表 / 笔记 | 刷新页面（每次请求都读盘） |
 | 双模式切换 | 立即（localStorage） |
+| 设置 → 造价工作台里保存配置 | 立即（Host 原地重建，不用重启） |
 | `client.js` | 重启 DSH（打包版没有热重载快捷键） |
 | `index.js` / `lib/*` | 重启 DSH |
 | `cordis.patch.yml` | 重启 DSH |

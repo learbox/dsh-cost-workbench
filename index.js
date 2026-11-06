@@ -25,7 +25,7 @@ import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
@@ -51,13 +51,21 @@ const API_PREFIX = '/api/dsh-workbench'
 const USER_CONFIG_FILE = join(homedir(), '.dsh-workbench', 'config.json')
 
 /** 同步读用户配置：apply 阶段就要定下路径，不能等异步。 */
-function loadUserConfigSync() {
+function loadUserConfigSync(file = USER_CONFIG_FILE) {
   try {
-    const parsed = JSON.parse(readFileSync(USER_CONFIG_FILE, 'utf8'))
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
     return parsed !== null && typeof parsed === 'object' ? parsed : {}
   } catch {
     return {}
   }
+}
+
+/** 用户配置文件路径：profile 配置可覆盖（测试用它隔离真实配置文件）。 */
+function resolveUserConfigFile(config) {
+  const raw = config !== null && typeof config === 'object' && typeof config.userConfigFile === 'string'
+    ? config.userConfigFile.trim()
+    : ''
+  return raw !== '' ? raw : USER_CONFIG_FILE
 }
 
 /** 读用户配置（首次引导写入的那份）；读不到就当没配。 */
@@ -83,6 +91,8 @@ const DEFAULT_CONFIG = {
   glossaryFile: '',
   recordingsDir: '会议记录',
   asrConfigFile: '',
+  // 用户配置文件（首次引导写入）；默认 ~/.dsh-workbench/config.json，测试可覆盖
+  userConfigFile: '',
   // 留空 = 按平台自动选择（Windows: cmd /c start、macOS: open、Linux: xdg-open）
   openCommand: '',
   // 文件夹选择器命令；留空 = 按平台自动（Windows: PowerShell FolderBrowserDialog）
@@ -107,6 +117,7 @@ function resolveConfig(config, configFile = null) {
     }
   }
   if (merged.dataDir === '') merged.dataDir = join(homedir(), '.dsh-workbench')
+  if (merged.userConfigFile === '') merged.userConfigFile = USER_CONFIG_FILE
   if (merged.cardsFile === '') merged.cardsFile = join(merged.dataDir, 'cards.json')
   if (merged.promptsFile === '') merged.promptsFile = join(merged.dataDir, 'prompts.json')
   if (merged.glossaryFile === '') merged.glossaryFile = join(merged.vaultRoot, merged.workbenchDir, '术语表.md')
@@ -389,7 +400,7 @@ async function serveAudio(req, res, filePath) {
 /** 路径存在性探测：缺文件是"卡片自己报错"的事，不抛。 */
 
 export function apply(ctx, config) {
-  let settings = resolveConfig(config, loadUserConfigSync())
+  let settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
   let vault = createVaultStore({
     vaultRoot: settings.vaultRoot,
     sopDir: settings.sopDir,
@@ -407,13 +418,13 @@ export function apply(ctx, config) {
       workbenchDir: settings.workbenchDir,
       recordingsDir: settings.recordingsDir,
       dataDir: settings.dataDir,
-      configFile: USER_CONFIG_FILE,
+      configFile: settings.userConfigFile,
     }
   }
 
   /** 保存配置后立即重建依赖路径的部件，用户不用重启。 */
   function rebuild() {
-    settings = resolveConfig(config, loadUserConfigSync())
+    settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
     vault = createVaultStore({
       vaultRoot: settings.vaultRoot,
       sopDir: settings.sopDir,
@@ -813,7 +824,7 @@ export function apply(ctx, config) {
             recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : '会议记录',
             dataDir: typeof body.dataDir === 'string' && body.dataDir.trim() !== '' ? body.dataDir.trim() : '',
           }
-          await mkdir(join(homedir(), '.dsh-workbench'), { recursive: true })
+          await mkdir(dirname(settings.userConfigFile), { recursive: true })
           // 把该有的目录先建出来：用户不需要自己去 Finder 里新建
           for (const dir of [next.sopDir, next.workbenchDir, next.recordingsDir]) {
             try {
@@ -822,7 +833,7 @@ export function apply(ctx, config) {
               // 建不了（权限）不影响保存，界面会提示读不到
             }
           }
-          await writeFile(USER_CONFIG_FILE, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
+          await writeFile(settings.userConfigFile, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
           rebuild()
           return writeJson(res, 200, { ok: true, ...configStatus() })
         }

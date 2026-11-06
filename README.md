@@ -1,203 +1,202 @@
-# Cost Workbench (dsh-cost-workbench)
+# 造价工作台（dsh-cost-workbench）
 
-A **cost-estimation workbench** that lives in the right sidebar of a DeepSeek Harness session:
-a note library, pricing basis, material prices, variation ledger, cost calculator, glossary,
-meeting recordings, and prompt templates — plus global search and a usage badge.
+[English](README.en.md) | 中文
 
-Your data is plain Markdown in an Obsidian vault. The workbench is just another view of the
-same files; there is no second database.
+一个跑在 DeepSeek Harness 会话右侧栏里的**造价工作台**：资料库、计价依据、材料价格、变更签证、
+造价计算器、术语表、会议记录、提示词模板，外加全局搜索与用量角标。
 
-This plugin is derived from `dsh-legal-workbench` (original authors' copyright, MIT), reworked for
-cost estimating on Windows. See [License](#license).
+数据就是你 Obsidian 库里的 Markdown 文件——工作台只是同一批文件的另一个视图，不引入第二份数据库。
 
-## Install
+本插件派生自 `dsh-legal-workbench`（原作者版权，MIT），改造为造价场景的 Windows 桌面版；派生说明见文末「许可」。
 
-**Requires** Windows 10/11 and the DeepSeek Harness 0.2.2 desktop app. The plugin is installed as a
-**link** from the local source folder — no download, no network access needed.
+## 安装
 
-1. **Quit DeepSeek Harness completely**: tray icon → Quit, then confirm in Task Manager that no
-   `DeepSeek` process is left. Closing the window is not enough; the tray process keeps running.
-2. In PowerShell (a normal, non-elevated shell is fine):
+**前提**：Windows 10/11，已安装 DeepSeek Harness 0.2.2 桌面版。本插件从本地源码目录**链接安装**，
+不从 npm 下载，安装过程不需要联网。
+
+### 推荐的安装方式
+
+1. **完全退出 DeepSeek Harness**：右键托盘图标 → 退出，再打开任务管理器确认没有 `DeepSeek` 相关进程残留。
+   （只关主窗口不算退出，托盘常驻进程仍在时安装不生效。）
+2. 打开 PowerShell（普通权限即可），执行：
 
    ```powershell
    cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
    ```
 
-   The script checks the process, resolves the plugin folder, calls the bundled DSH CLI, and tells
-   you to restart the app when it finishes.
-3. **Restart DeepSeek Harness.**
-4. Open any session and click the workbench icon next to the session title, or press `Alt+W`.
+   脚本会检查进程、解析插件源码目录、调用 DSH 自带的 CLI 完成安装，并在最后提示「重开 App 后生效」。
+3. **重新启动 DeepSeek Harness**。
+4. 打开任意会话，点标题旁的造价工作台图标，或按 `Alt+W`（macOS 上是 `⌥W`）。
 
-### Manual install (same thing)
+### 手动安装（等价）
 
 ```powershell
-& "C:\Users\<you>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+& "C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
 ```
 
-Using a custom profile? Replace `desktop` with your profile name (see `C:\Users\<you>\.dsh\profiles\`).
-Either way, the change takes effect after an app restart.
+如果你想用自定义 profile，把 `desktop` 换成你自己的 profile 名（`C:\Users\<你>\.dsh\profiles\` 下能看到）。
+安装完成后的生效条件是**重启 App**：Host 与客户端两半都要重新加载。
 
-### If the install fails
+### 安装失败怎么办
 
-The script prints the absolute path of the profile patch file:
+脚本失败时会打印 profile patch 文件的绝对路径：
 
 ```
-C:\Users\<you>\.dsh\profiles\desktop\cordis.patch.yml
+C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml
 ```
 
-It only prints the path — it never edits the file for you. Check that the CLI version matches the
-app (0.2.2), back up the file, then append a `dsh-cost-workbench` insert entry as described by the
-script and restart the app.
+它只打印路径、**不会替你写文件**。确认 CLI 版本与 DSH 版本匹配（0.2.2）后，可以按脚本输出的提示，
+在该文件末尾追加一条 `dsh-cost-workbench` 的 insert 条目，再重启 App。动手前先备份这个文件。
 
-## First run
+## 第一次使用
 
-The first time you open the workbench it asks for exactly one thing: the path of your Obsidian
-vault. Enter `E:\文档\Obsidian\造价工作台` and save.
+配置只有一个必填项：**Obsidian 库路径**。两个入口都可以：
 
-If that vault does not exist yet, run the seed script first (it is idempotent — existing files are
-skipped, never overwritten):
+- **设置 → 造价工作台**（推荐，之后随时回来改）
+- **第一次打开工作台时**的引导页（兜底入口）
+
+两种填法：
+
+- 点输入框右边的 **「选择…」**，在弹出的系统文件夹选择框里挑一个目录（目录不存在会顺手创建）；
+- 或者直接把路径粘进输入框，例如：
+
+```
+E:\文档\Obsidian\造价工作台
+```
+
+保存即生效，之后不用再管。路径为空时保存会直接提示，不会无声失败。
+
+### 之后怎么改
+
+打开 **设置 → 造价工作台**：改库路径、资料库子目录、录音目录，点「保存」立即生效，工作台下次取数就是新库；
+也可以在同一页点「选择…」重新挑目录。不需要重启，也不会丢已有笔记。
+
+如果这个库还不存在，先运行种子脚本，它会幂等创建目录和起始内容（已存在的文件一律跳过，不覆盖你的改动）：
 
 ```powershell
 cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 ```
 
-It creates the `Workbench/` tables (a glossary with 30 cost terms, five sample pricing-basis rows,
-empty material-price and variation ledgers) and four starter notes under `00 资料库/`.
+种子内容包含：`Workbench/` 下的术语表（30 条造价中英术语）、计价依据（5 条示例）、
+材料价格与变更签证台账（表头就绪、等待你填），以及 `00 资料库/` 四个子目录各一篇起始笔记。
 
-## Opening it
+## 打开
 
-- **A session with messages**: the icon to the right of the session title.
-- **A brand-new empty session**: the rightmost button in the row above the composer.
-- **Shortcut**: `Alt+W` on Windows (`⌥W` on macOS); `Esc` closes.
+- **已有消息的会话**：标题右侧那颗图标。
+- **刚新建的空会话**：输入框上方那一排的右端，「造价工作台」按钮。
+- **快捷键**：`Alt+W`（macOS `⌥W`）；`Esc` 关闭。
 
-It docks as a tab in the right sidebar (resizable, full-screenable, closable). When the sidebar is
-not available in a session it falls back to an overlay instead of failing silently.
+打开后是右侧栏的一个标签页，可以拖宽、全屏、关闭，不影响左边的对话。
+放不进右侧栏时（某些会话还没挂载右栏），工作台会自动改用浮层打开，不会静默失败。
 
-## The eight cards
+## 八张卡片
 
-| Card | What it does |
+| 卡片 | 做什么 |
 |---|---|
-| **Library** | Tree of `00 资料库/`; read a note on the right, edit it back, insert it into the composer, open it in Obsidian, or copy it |
-| **Pricing basis** | Code, name, category, version/number, effective date, note; create/edit/delete lands on disk immediately |
-| **Material prices** | Material, spec, unit, price, region, date, source; a duplicate "material + spec + unit + region" is rejected |
-| **Variations** | Code, project, reason, amount, date, status (pending / approved / settled / rejected) — the ledger for variations, site instructions and claims |
-| **Cost calculator** | Five sections: ① build-up of a comprehensive unit price from labour/material/machine/overhead%/profit%/statutory fee/tax%; ② total cost (work items + measures + other + fees + tax, tax defaults to 9%); ③ rebar theoretical weight (diameter in mm → kg/m, comma-separated batch, `w = d² × 0.00617`); ④ cost per m² and steel content per m²; ⑤ unit conversions (m³↔L, t↔kg, MPa↔N/mm², 万元↔元, m²↔亩) |
-| **Glossary** | Chinese, English, domain, tags, note — five columns, CRUD lands immediately, whole table can be inserted into the chat |
-| **Meetings** | Record in the browser (16k/16bit/mono WAV), transcribe while recording, pause/resume, annotate, highlight, play back; audio and transcripts go to `会议记录/` |
-| **Prompt templates** | Templates from `prompts.json`, inserted into the composer (never sent). Ships with 7 cost templates: tender review, bid document outline, variation order, claim and delay analysis, inquiry/clarification letter, settlement review checklist, BOQ pricing note — plus a whole-glossary insert |
+| **资料库** | 左栏是 `00 资料库/` 的目录树，点一篇右栏直接读正文；可「编辑」写回、「插入」进输入框、「打开」跳 Obsidian、「复制」 |
+| **计价依据** | 编号、名称、类别、版本文号、实施日期、备注；增删改查落盘即生效 |
+| **材料价格** | 材料、规格、单位、单价、地区、日期、来源；同一「材料＋规格＋单位＋地区」重复新增会被拒绝 |
+| **变更签证** | 编号、项目、事由、金额、日期、状态（待审批 / 已批准 / 已结算 / 已驳回），变更、签证、索赔的流水账 |
+| **造价计算器** | 5 个分区：① 综合单价组价（人工 / 材料 / 机械 / 管理费率 % / 利润率 % / 规费 / 税率 % → 综合单价）② 总造价（分部分项 + 措施 + 其他 + 规费 + 税金，税率默认 9%）③ 钢筋理论重量（直径 mm → kg/m，批量逗号分隔，`w = d² × 0.00617`）④ 单位造价与含钢量（总价 / 建筑面积、钢筋总量 / 建筑面积）⑤ 单位换算（m³↔L、t↔kg、MPa↔N/mm²、万元↔元、m²↔亩） |
+| **术语表** | 中文、英文、领域、标签、备注五列，增删改查落盘即生效；整表可插入当前对话 |
+| **会议记录** | 浏览器内录音（16k / 16bit / 单声道 WAV），边录边转写；支持暂停续录、批注、高亮、回放；录音与转写稿落在 `会议记录/` |
+| **提示词模板** | 读 `prompts.json` 里的模板，一键写进输入框（只写不发）。内置 7 个造价常用模板：招标文件审查、投标文件框架、变更签证单、索赔与工期分析、询价 / 澄清函、结算审核要点、清单组价说明，外加「整表插入」 |
 
-Above the cards:
+顶部还有一行：
 
-- **Global search** across the library, all three tables, the glossary, and meeting transcripts and annotations; results are labelled by source.
-- **Usage badge**: DeepSeek balance and remaining speech hours. Hidden until you supply your own
-  credentials; everything else works without it.
+- **全局搜索**：一次搜资料库正文、三张表、术语表、会议记录的转写稿与批注，结果标注来源。
+- **用量角标**：DeepSeek 余额与语音剩余时长；没配密钥就不显示，不耽误别的功能。
 
-## Cost mode / Lite mode
+## 造价模式 / 普通模式
 
-A segmented **造价 / 普通** (cost / lite) button sits at the right of the toolbar.
+工作台工具栏右侧有一个分段按钮：**造价 / 普通**。
 
-- **Cost** (default): all eight cards.
-- **Lite**: only the global search box; every card is hidden.
+- **造价**（默认）：八张卡片全部显示，这是日常形态。
+- **普通**：只保留全局搜索框，其余卡片全部隐藏，适合只想拿它当搜索入口、或需要一条干净侧栏的时候。
 
-The choice is stored in the browser's `localStorage` under `dsh-cost-workbench.mode`
-(`cost` / `lite`). It is never written into the vault and never uploaded. There is no shortcut for
-the switch — click the button.
+选择存在浏览器本地存储（`localStorage`，键名 `dsh-cost-workbench.mode`，取值 `cost` / `lite`）里，
+**不写进 Obsidian 库**，也不会上传到别处；换机器、清缓存后需要重新选一次。
 
-## Inserting prompts
+模式切换没有独立快捷键，点按钮即可。
 
-It writes to the composer and never sends. If there is already a draft, it asks first:
-**append / replace / cancel**, defaulting to leaving your text alone.
+## 插入 prompt 的规矩
 
-## Library and Obsidian
+只写输入框、不发送。输入框里已有草稿时会先弹一条确认：**追加 / 覆盖 / 取消**，默认不动你的字。
 
-- Notes under `00 资料库/` are the whole content of the Library card; the workbench is just a view.
-- Save in Obsidian, switch back in the workbench, and you see the new content (it re-reads on open,
-  search and focus).
-- Edits made here are written back to the same file, so Obsidian sees them immediately.
-- To avoid clobbering: a save compares against the version you read. If the file changed elsewhere,
-  it refuses to write and offers **reload** or **overwrite anyway**. A backup is kept before each save.
+## 资料库与 Obsidian 的关系
 
-## Where things live
+- `00 资料库/`（目录名可改）下的笔记就是资料库卡的全部内容，工作台只是它的另一个视图。
+- 在 Obsidian 改完保存，工作台切回来就是新的（打开、搜索、切窗口都会重读）。
+- 在工作台里改也一样：写回原文件，Obsidian 立刻看到。
+- 为防止互相覆盖：保存前会比对你读到的那一版，如果文件在别处被改过，会**拒绝写入**并让你选择「重新载入」或「仍要覆盖」。每次保存前留一份备份。
+
+## 数据都在哪
 
 ```
-E:\文档\Obsidian\造价工作台\          the Obsidian vault (single source of truth)
+E:\文档\Obsidian\造价工作台\          Obsidian 库（工作台的唯一事实源）
   00 资料库\
     01 计价依据\
     02 招投标流程\
     03 合同与索赔\
     04 常用模板\
-  会议记录\                            recordings and transcripts
-  Workbench\术语表.md                  glossary
-  Workbench\计价依据.md                pricing basis
-  Workbench\材料价格.md                material prices
-  Workbench\变更签证台账.md            variation ledger
-  Workbench\.backups\                  automatic backups (before every write)
+  会议记录\                            录音与转写稿
+  Workbench\术语表.md                   术语表
+  Workbench\计价依据.md                 计价依据速查表
+  Workbench\材料价格.md                 材料价格库
+  Workbench\变更签证台账.md             变更签证流水
+  Workbench\.backups\                   自动备份（每次写盘前）
 
-C:\Users\<you>\.dsh-workbench\cards.json      card list (created on first run)
-C:\Users\<you>\.dsh-workbench\prompts.json    prompt templates
-C:\Users\<you>\.dsh-workbench\config.json     first-run config (vault path, folder names)
-C:\Users\<you>\.dsh-workbench\asr.json        optional transcription credentials
+C:\Users\<你>\.dsh-workbench\cards.json      卡片清单（增删卡片、改标题、改顺序只改这里；首次运行自动创建）
+C:\Users\<你>\.dsh-workbench\prompts.json    prompt 模板
+C:\Users\<你>\.dsh-workbench\config.json     首次引导写入的配置（库路径、目录名）
+C:\Users\<你>\.dsh-workbench\asr.json        可选的语音转写凭据（不进仓库、不上传）
 ```
 
-Changing `cards.json` / `prompts.json` / the tables / the glossary / notes: **refresh the page**.
-Changing plugin code: the client needs a refresh; the host half and `cordis.patch.yml` need an app
-restart.
+改 `cards.json` / `prompts.json` / 三张表 / 术语表 / 笔记：**刷新页面即可**。
+改插件代码：客户端刷新，Host 部分与 `cordis.patch.yml` 需要重启 App。
 
-## Uninstall
+## 卸载
 
-Disable or remove the plugin from Settings → Plugins, or run:
+插件可以从 设置 → 插件 里停用或移除；也可以：
 
 ```powershell
-& "C:\Users\<you>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop remove dsh-cost-workbench
+& "C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop remove dsh-cost-workbench
 ```
 
-Uninstalling **does not delete** your vault, `cards.json`, `prompts.json`, the tables, the glossary or
-your recordings.
+卸载**不会删除**你的 Obsidian 库、`cards.json`、`prompts.json`、三张表、术语表与会议记录。
 
-## Known limitations on Windows
+## Windows 已知限制
 
-- **"Open in Obsidian" uses the `obsidian://` protocol** and needs Obsidian installed and registered.
-  Without it the button reports the problem instead of crashing.
-- **The shortcut is `Alt+W`** (not macOS's `⌥W`). The host or an IME may claim `Alt+W`; use the icon then.
-- **Microphone access** is controlled by Windows: Settings → Privacy & security → Microphone → allow
-  desktop apps before recording for the first time.
-- **Images in notes are not rendered**; they appear as a filename label. Text content (headings,
-  lists, bold, code, wikilinks) is shown normally.
-- Markdown support is deliberately minimal: no HTML, no embedded PDFs, no mermaid.
-- Annotations anchor to the **first line** of a multi-line selection; the highlight colour is fixed.
-- Transcribing an imported audio file shows no progress bar.
-- **Chinese characters and spaces in paths are fine**, but use absolute paths in the config.
-- **The panel opens but stays empty**: click the **refresh** button at the top right of the panel.
-- The workbench reads and writes the vault directly: Obsidian edits appear after a refresh, workbench
-  edits appear in Obsidian immediately (same files).
+- **「在 Obsidian 中打开」依赖 `obsidian://` 协议**：需要 Obsidian 已安装并注册协议；没装时按钮会给提示，不会崩溃。
+- **快捷键是 `Alt+W`**，不是 macOS 的 `⌥W`。宿主或输入法可能占用 `Alt+W`，此时用图标打开即可。
+- **首次录音需要麦克风权限**：Windows 设置 → 隐私和安全性 → 麦克风，允许桌面应用访问。
+- **笔记里的图片不显示**，会显示成文件名标签（如「图片 photo.png」）。文字内容（标题、列表、加粗、代码、双链）正常。
+- Markdown 支持是刻意精简的：不渲染 HTML、内嵌 PDF、mermaid。
+- 批注锚定到多行选择的**第一行**；高亮颜色固定为黄色。
+- 导入的音频转写时没有进度条。
+- **路径含中文与空格没问题**，但配置里请用绝对路径（如 `E:\文档\Obsidian\造价工作台`）。
+- **面板打开了但一片空白**：点面板右上角的**刷新**按钮。这是首次加载的已知问题，刷新一次后正常。
+- 工作台直接读写 Obsidian 库：Obsidian 里的改动刷新后可见，这里的改动在 Obsidian 里立刻可见（同一份文件）。
 
-## Rollback
+## 回滚
 
-- **Disable the plugin**: Settings → Plugins → disable, or the `plugin remove` command above, then
-  restart the app. Your vault and config files stay.
-- **Roll back to the pre-fork version**: fetch `dsh-legal-workbench` v1.1.1 from upstream and point
-  `plugin add` at that source folder. The old and new vault layouts differ, so re-point the vault path
-  in the first-run screen afterwards.
-- **Roll back a single file**: `Workbench\.backups\` holds the pre-write copy of every file; Obsidian's
-  file recovery snapshots are a second option.
+- **停用插件**：设置 → 插件 → 停用，或执行上面的 `plugin remove`，然后重启 App。库与配置文件都保留。
+- **回滚到派生前的旧版**：源码仍可从上游 `dsh-legal-workbench`（v1.1.1）取回，重新执行 `plugin add` 指向旧源码目录即可；旧版与本版的 Obsidian 库结构不同，回滚后请把库路径重新指到旧版使用的目录。
+- **回滚单个文件**：`Workbench\.backups\` 下是每次写盘前的自动备份；Obsidian 若开启了「文件恢复」也可以从快照找回。
 
-## Troubleshooting
+## 故障排查
 
-- **Clicking the icon does nothing**: some sessions have no right sidebar yet, so the workbench opens
-  as an overlay (`Alt+W`). If that still fails, restart the app.
-- **It asks you to configure something**: it only needs the vault path; fill it in once.
-- **No cards after installing**: make sure the app was **fully quit** (including the tray) before
-  restarting, and that `dsh plugin --profile desktop list` shows `dsh-cost-workbench`.
-- **A table refuses to save**: a single field may not contain a pipe `|`, a newline or a tab (it would
-  break the Markdown table); the UI tells you which column.
+- **点了图标没反应**：有些会话的右侧栏还没挂载，工作台会自动改用浮层打开（`Alt+W`）；仍不行就重启 App。
+- **提示「先配置一下」**：说明还没告诉它库路径，按提示填一次即可。
+- **装完看不到卡片**：确认已**完全退出** App 再重开（含托盘）；确认 `dsh plugin --profile desktop list` 里能看到 `dsh-cost-workbench`。
+- **表格写不进去**：单字段不能含竖线 `|`、换行或制表符（会破坏 Markdown 表格），界面会给出具体是哪一列。
 
-## License
+## 许可
 
-MIT — see [LICENSE](./LICENSE).
+MIT，见 [LICENSE](./LICENSE)。
 
-This plugin is derived from [`dsh-legal-workbench`](https://github.com/gaog88666-boop/dsh-legal-workbench).
-The original code and documentation are copyright their authors under the MIT license; this repository
-reworks them for cost estimating on Windows. The upstream MIT license and copyright notice continue to
-apply to the derived portions — see [LICENSE](./LICENSE).
+本插件派生自 [`dsh-legal-workbench`](https://github.com/gaog88666-boop/dsh-legal-workbench)：
+原始代码与文档的版权归原作者所有（MIT 许可），本仓库在其基础上改造为造价场景的 Windows 桌面版。
+上游的 MIT 许可与版权声明继续适用于派生部分，见 [LICENSE](./LICENSE)。
