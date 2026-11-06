@@ -84,6 +84,8 @@ const DEFAULT_CONFIG = {
   asrConfigFile: '',
   // 留空 = 按平台自动选择（Windows: cmd /c start、macOS: open、Linux: xdg-open）
   openCommand: '',
+  // 文件夹选择器命令；留空 = 按平台自动（Windows: PowerShell FolderBrowserDialog）
+  folderPickerCommand: '',
 }
 
 function resolveConfig(config, configFile = null) {
@@ -253,6 +255,54 @@ async function handleEntryTable({ req, res, url, method, route, base, file, api 
     return writeJson(res, 200, { ok: true, total: result.entries.length })
   }
   return writeError(res, 405, 'method_not_allowed', 'PUT or DELETE')
+}
+
+/**
+ * 弹系统文件夹选择框，返回用户选中的绝对路径（取消则返回空串）。
+ * Windows 走 PowerShell 5.1 的 FolderBrowserDialog（需要 STA）；
+ * macOS 走 osascript choose folder；Linux 走 zenity。folderPickerCommand 配了值就优先用配置的命令。
+ */
+function pickFolder(command, timeoutMs = 300000) {
+  const custom = typeof command === 'string' ? command.trim() : ''
+  const WIN_SCRIPT = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$d.Description = '选择造价工作台的 Obsidian 库目录'",
+    '$d.ShowNewFolderButton = $true',
+    'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }',
+  ].join('; ')
+  return new Promise((resolve, reject) => {
+    const done = (error, stdout) => {
+      if (error !== null && error !== undefined) {
+        reject(Object.assign(new Error('打开文件夹选择器失败：' + describe(error)), { code: 'picker_failed' }))
+        return
+      }
+      const lines = String(stdout ?? '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
+      resolve(lines.length === 0 ? '' : lines[lines.length - 1])
+    }
+    try {
+      if (custom !== '') {
+        execFile(custom, [], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 }, done)
+        return
+      }
+      if (process.platform === 'win32') {
+        execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', WIN_SCRIPT], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 }, done)
+        return
+      }
+      if (process.platform === 'darwin') {
+        execFile('osascript', ['-e', 'POSIX path of (choose folder with prompt "选择造价工作台的 Obsidian 库目录")'], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, done)
+        return
+      }
+      execFile('zenity', ['--file-selection', '--directory', '--title=选择造价工作台的 Obsidian 库目录'], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, done)
+    } catch (error) {
+      done(error)
+    }
+  })
+}
+
+/** 绝对路径判断：POSIX、Windows 盘符、Windows UNC。 */
+function isAbsolutePath(value) {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
 /** 读原始字节体（音频分片用），超过上限直接拒绝。 */
@@ -733,7 +783,7 @@ export function apply(ctx, config) {
           const vaultRoot = typeof body.vaultRoot === 'string' ? body.vaultRoot.trim() : ''
           if (vaultRoot === '') return writeError(res, 400, 'bad_request', '请填写笔记文件夹的绝对路径')
           // 绝对路径的三种写法：POSIX（/…）、Windows 盘符（D:\… 或 D:/…）、Windows UNC（\\服务器\共享）
-          const isAbsolute = vaultRoot.startsWith('/') || /^[A-Za-z]:[\\/]/.test(vaultRoot) || vaultRoot.startsWith('\\\\')
+          const isAbsolute = isAbsolutePath(vaultRoot)
           if (!isAbsolute) return writeError(res, 400, 'bad_request', '请填写绝对路径：macOS 以 / 开头，Windows 形如 D:\\文件夹')
           const next = {
             vaultRoot,
@@ -756,6 +806,23 @@ export function apply(ctx, config) {
           return writeJson(res, 200, { ok: true, ...configStatus() })
         }
         return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
+      }
+
+      /* ------------------------------------------------------ 文件夹选择器 */
+      if (route === '/pick-folder') {
+        if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
+        const picked = await pickFolder(settings.folderPickerCommand)
+        if (picked === '') return writeJson(res, 200, { ok: true, path: '', cancelled: true })
+        if (!isAbsolutePath(picked)) return writeError(res, 400, 'bad_path', '选择器返回的不是绝对路径：' + picked)
+        let created = false
+        try {
+          const info = await stat(picked)
+          if (!info.isDirectory()) return writeError(res, 400, 'bad_path', '选中的是文件，不是文件夹')
+        } catch {
+          await mkdir(picked, { recursive: true })
+          created = true
+        }
+        return writeJson(res, 200, { ok: true, path: picked, created })
       }
 
       // 没配 vault 之前，除了 /config 之外一律拒绝，避免满屏报错

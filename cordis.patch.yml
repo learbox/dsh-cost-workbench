@@ -18,3 +18,5 @@
         asrConfigFile: ""
         # 打开 Obsidian / 外部网页用的命令；留空 = 按平台自动（Windows: cmd /c start）
         openCommand: ""
+        # 文件夹选择器命令；留空 = 按平台自动（Windows: PowerShell 文件夹选择框）
+        folderPickerCommand: ""

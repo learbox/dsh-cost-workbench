@@ -1586,6 +1586,7 @@ const WB_CALC = {
           const [setup, setSetup] = React.useState(null)
           const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录' })
           const [setupBusy, setSetupBusy] = React.useState(false)
+          const [pickerBusy, setPickerBusy] = React.useState(false)
           React.useEffect(() => {
             let alive = true
             api('/config').then(
@@ -1908,12 +1909,37 @@ const WB_CALC = {
               : null
 
           if (setup !== null && setup.configured !== true) {
-            const saveSetup = () => {
-              setSetupBusy(true)
-              api('/config', { method: 'PUT', body: setupDraft })
+            /** 弹系统文件夹选择框，选中后回填空格；目录不存在时 Host 会自动创建。 */
+            const pickFolder = () => {
+              setPickerBusy(true)
+              setFlash(null)
+              api('/pick-folder', { method: 'POST', body: {} })
                 .then((data) => {
-                  setSetup(data)
-                  setFlash('已保存，正在加载…')
+                  if (typeof data.path === 'string' && data.path !== '') {
+                    setSetupDraft((current) => ({ ...current, vaultRoot: data.path }))
+                    if (data.created === true) setFlash('已选择并创建目录：' + data.path)
+                  } else if (data.cancelled === true) {
+                    setFlash('已取消选择')
+                  }
+                }, (error) => setFlash('打开文件夹选择器失败：' + error.message))
+                .finally(() => setPickerBusy(false))
+            }
+            const saveSetup = () => {
+              const vaultRoot = String(setupDraft.vaultRoot ?? '').trim()
+              if (vaultRoot === '') {
+                setFlash('请先填写路径，或点「选择…」挑一个文件夹')
+                return
+              }
+              setSetupBusy(true)
+              setFlash(null)
+              api('/config', { method: 'PUT', body: { ...setupDraft, vaultRoot } })
+                .then((data) => {
+                  if (data.configured === true) {
+                    setSetup(data)
+                    setFlash('已保存，正在加载…')
+                  } else {
+                    setFlash('保存后仍未生效，请检查路径后重试')
+                  }
                 }, (error) => setFlash('保存失败：' + error.message))
                 .finally(() => setSetupBusy(false))
             }
@@ -1921,18 +1947,26 @@ const WB_CALC = {
               h('div', { className: 'dsh-wb-head' },
                 h('div', null,
                   h('h2', null, '先配置一下'),
-                  h('div', { className: 'dsh-wb-sub' }, '工作台读写一个文件夹里的 Markdown 笔记。填一次，以后不用再管。'),
+                  h('div', { className: 'dsh-wb-sub' }, '工作台读写一个文件夹里的 Markdown 笔记。选一次，以后不用再管。'),
                 ),
               ),
               h('div', { className: 'dsh-wb-body' },
+                flash !== null ? h('div', { className: 'dsh-wb-error' }, flash) : null,
                 h('div', { className: 'dsh-wb-card' },
                   h('div', { className: 'dsh-wb-note' }, '笔记文件夹的完整路径（Obsidian 库，或任意文件夹都可以）'),
-                  h('input', {
-                    className: 'dsh-wb-input', style: { marginTop: '4px' },
-                    placeholder: 'E:\\文档\\Obsidian\\造价工作台',
-                    value: setupDraft.vaultRoot,
-                    onChange: (event) => setSetupDraft({ ...setupDraft, vaultRoot: event.target.value }),
-                  }),
+                  h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px' } },
+                    h('input', {
+                      className: 'dsh-wb-input', style: { flex: '1 1 auto', minWidth: '0' },
+                      placeholder: '点右边「选择…」，或直接粘贴，如 E:\\文档\\Obsidian\\造价工作台',
+                      value: setupDraft.vaultRoot,
+                      onChange: (event) => setSetupDraft({ ...setupDraft, vaultRoot: event.target.value }),
+                    }),
+                    h('button', {
+                      type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary',
+                      disabled: pickerBusy, style: { flex: 'none', height: '28px' },
+                      onClick: pickFolder,
+                    }, pickerBusy ? '选择中…' : '选择…'),
+                  ),
                   h('div', { className: 'dsh-wb-note', style: { marginTop: '10px' } }, '资料库子目录（相对库根目录）'),
                   h('input', {
                     className: 'dsh-wb-input', style: { marginTop: '4px' },

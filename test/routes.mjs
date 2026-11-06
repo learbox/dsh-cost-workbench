@@ -97,7 +97,12 @@ try {
     glossaryFile,
     // 故意给一个不存在的打开命令：验证 open_failed 分支，同时避免测试真的去拉起 Obsidian。
     openCommand: '__missing_open_command__',
+    // 同理：文件夹选择器用不存在的命令，避免测试弹出系统对话框。
+    folderPickerCommand: '__missing_picker__',
   })
+
+  const picker = await call('POST', '/pick-folder', {})
+  check('文件夹选择器失败时报 picker_failed', picker.status === 500 && picker.json.code === 'picker_failed', picker.raw.slice(0, 160))
 
   const current = await call('GET', '/sop?note=' + encodeURIComponent('00 资料库/甲.md'))
   check('临时 vault 读到正文', current.status === 200 && current.json.note.text.includes('原文'))
