@@ -173,6 +173,29 @@ It writes to the composer and never sends. If there is already a draft, it asks 
 - To avoid clobbering: a save compares against the version you read. If the file changed elsewhere,
   it refuses to write and offers **reload** or **overwrite anyway**. A backup is kept before each save.
 
+## Projects (per-project folders)
+
+Variations, material prices, pricing basis, library notes and meeting recordings are stored **per
+project**; the glossary stays global.
+
+- The **Project** selector at the left of the panel toolbar defaults to “Public library”; picking a
+  project switches those cards to that project's folder
+- The `＋` button creates a project (name it like a job, e.g. a school tender control price); it
+  creates the folder layout and empty tables for you
+- Project layout:
+
+```
+<vault>/项目/<project>/
+├─ Workbench\变更签证台账.md, 材料价格.md, 计价依据.md
+├─ 00 资料库\            ← project-only notes
+└─ 会议记录\
+```
+
+- “Public library” keeps the original global tables for shared material; projects never mix into it
+- The glossary always lives at `<vault>/Workbench/术语表.md` and is shared by every project
+- Switching a project also switches cards, search and recordings; the choice is stored in
+  `~/.dsh-workbench/config.json` as `currentProject`
+
 ## Where things live
 
 ```

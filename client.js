@@ -1587,6 +1587,9 @@ const WB_CALC = {
           const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '' })
           const [setupBusy, setSetupBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
+          const [projects, setProjects] = React.useState([])
+          const [currentProject, setCurrentProject] = React.useState('')
+          const [projectBusy, setProjectBusy] = React.useState(false)
           React.useEffect(() => {
             let alive = true
             api('/config').then(
@@ -1599,6 +1602,19 @@ const WB_CALC = {
             )
             return () => { alive = false }
           }, [])
+
+          React.useEffect(() => {
+            let alive = true
+            api('/projects').then(
+              (data) => {
+                if (!alive) return
+                setProjects(Array.isArray(data.projects) ? data.projects : [])
+                setCurrentProject(typeof data.current === 'string' ? data.current : '')
+              },
+              () => {},
+            )
+            return () => { alive = false }
+          }, [reloadKey])
 
           React.useEffect(() => {
             let alive = true
@@ -1696,6 +1712,38 @@ const WB_CALC = {
             setPending({ text, label, length: draft.length })
           }
 
+          function switchProject(name) {
+            if (projectBusy) return
+            setProjectBusy(true)
+            api('/projects/current', { method: 'PUT', body: { name } }).then(
+              (data) => {
+                setCurrentProject(typeof data.currentProject === 'string' ? data.currentProject : name)
+                setFlash(name === '' ? '已切回公共库' : '已切换到项目：' + name)
+                setReloadKey((value) => value + 1)
+              },
+              (error) => setFlash('切换项目失败：' + error.message),
+            ).finally(() => setProjectBusy(false))
+          }
+
+          function createProject() {
+            if (projectBusy) return
+            const input = typeof window.prompt === 'function' ? window.prompt('新项目名称（例如：赫山中学招标控制价）') : null
+            if (input === null) return
+            const name = String(input).trim()
+            if (name === '') return
+            setProjectBusy(true)
+            api('/projects', { method: 'POST', body: { name } }).then(
+              () => api('/projects/current', { method: 'PUT', body: { name } }),
+            ).then(
+              (data) => {
+                setCurrentProject(typeof data.currentProject === 'string' ? data.currentProject : name)
+                setFlash('已创建并切换到项目：' + name)
+                setReloadKey((value) => value + 1)
+              },
+              (error) => setFlash('新建项目失败：' + error.message),
+            ).finally(() => setProjectBusy(false))
+          }
+
           function insertPrompt(promptId) {
             const prompt = prompts[promptId]
             if (prompt === undefined) {
@@ -1723,6 +1771,25 @@ const WB_CALC = {
           const pricing = deepseekPricingNow()
 
           const head = h('div', { className: 'dsh-wb-toolbar' },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px', marginRight: 'auto', minWidth: '0' } },
+              h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, '项目'),
+              h('select', {
+                className: 'dsh-wb-input dsh-wb-select',
+                style: { width: 'auto', maxWidth: '170px', height: '24px', flex: '0 1 auto' },
+                value: currentProject,
+                disabled: projectBusy,
+                title: '项目相关的表、资料库与会议记录都跟着切换；术语表始终全局',
+                onChange: (event) => switchProject(event.target.value),
+              },
+                h('option', { value: '' }, '公共库'),
+                projects.map((name) => h('option', { key: name, value: name }, name)),
+              ),
+              h('button', {
+                type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet',
+                disabled: projectBusy, title: '新建项目', 'aria-label': '新建项目',
+                onClick: createProject,
+              }, '＋'),
+            ),
             usage.deepseek !== null && usage.deepseek.configured === true
               ? h('button', {
                   type: 'button',

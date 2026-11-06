@@ -23,7 +23,7 @@
  */
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
@@ -86,6 +86,8 @@ const DEFAULT_CONFIG = {
   sopDir: '00 资料库',
   // Obsidian 库名：默认空 = 用库文件夹名；Obsidian 里改过库名时填这里
   obsidianVaultName: '',
+  // 当前项目名；空 = 公共库（不按项目分目录）
+  currentProject: '',
   workbenchDir: 'Workbench',
   dataDir: '',
   cardsFile: '',
@@ -113,7 +115,7 @@ function resolveConfig(config, configFile = null) {
   }
   // 用户配置文件的优先级介于「默认值」与「profile 配置」之间
   if (configFile !== null && typeof configFile === 'object') {
-    for (const key of ['vaultRoot', 'dataDir', 'sopDir', 'obsidianVaultName', 'workbenchDir', 'recordingsDir']) {
+    for (const key of ['vaultRoot', 'dataDir', 'sopDir', 'obsidianVaultName', 'currentProject', 'workbenchDir', 'recordingsDir']) {
       const value = typeof configFile[key] === 'string' ? configFile[key].trim() : ''
       if (value !== '' && (merged[key] === '' || merged[key] === DEFAULT_CONFIG[key] || key === 'vaultRoot')) merged[key] = value
     }
@@ -430,6 +432,41 @@ function isAbsolutePath(value) {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
+/** 项目名归一：空串 = 公共库；非法字符/超长/点目录返回 null。 */
+function normalizeProjectName(value) {
+  const text = String(value ?? '').trim()
+  if (text === '') return ''
+  if (text === '.' || text === '..' || text.length > 60) return null
+  if (/[/\\:*?"<>|\0]/.test(text)) return null
+  return text
+}
+
+/**
+ * 按「当前项目」派生各数据目录。
+ * 项目为空 → 公共库（沿用旧布局）；否则全部落在 `<vault>/项目/<项目名>/` 下。
+ * 术语表始终是全局的 `Workbench/术语表.md`，不随项目走。
+ */
+function buildStores(settings) {
+  const project = normalizeProjectName(settings.currentProject) ?? ''
+  if (project === '') {
+    return {
+      project: '',
+      sopDir: settings.sopDir,
+      recordingsRoot: join(settings.vaultRoot, settings.recordingsDir),
+      workbenchDir: join(settings.vaultRoot, settings.workbenchDir),
+      backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+    }
+  }
+  const base = join(settings.vaultRoot, '项目', project)
+  return {
+    project,
+    sopDir: '项目/' + project + '/00 资料库',
+    recordingsRoot: join(base, '会议记录'),
+    workbenchDir: join(base, 'Workbench'),
+    backupDir: join(base, 'Workbench', '.backups'),
+  }
+}
+
 /** 读 asr.json（凭据文件）；读不到当空对象。只在 Host 内使用，绝不返回明文。 */
 async function readAsrSettings(file) {
   try {
@@ -521,14 +558,15 @@ async function serveAudio(req, res, filePath) {
 
 export function apply(ctx, config) {
   let settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
+  let stores = buildStores(settings)
   let vault = createVaultStore({
     vaultRoot: settings.vaultRoot,
-    sopDir: settings.sopDir,
-    backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+    sopDir: stores.sopDir,
+    backupDir: stores.backupDir,
     vaultName: settings.obsidianVaultName,
   })
-  let costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
-  let recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
+  let costTables = createCostTables({ workbenchDir: stores.workbenchDir })
+  let recordings = createRecordingStore({ root: stores.recordingsRoot })
 
   /** 给界面用的配置状态。 */
   function configStatus() {
@@ -537,6 +575,7 @@ export function apply(ctx, config) {
       vaultRoot: settings.vaultRoot,
       sopDir: settings.sopDir,
       obsidianVaultName: settings.obsidianVaultName,
+      currentProject: stores.project,
       workbenchDir: settings.workbenchDir,
       recordingsDir: settings.recordingsDir,
       dataDir: settings.dataDir,
@@ -547,14 +586,15 @@ export function apply(ctx, config) {
   /** 保存配置后立即重建依赖路径的部件，用户不用重启。 */
   function rebuild() {
     settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
+    stores = buildStores(settings)
     vault = createVaultStore({
       vaultRoot: settings.vaultRoot,
-      sopDir: settings.sopDir,
-      backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+      sopDir: stores.sopDir,
+      backupDir: stores.backupDir,
       vaultName: settings.obsidianVaultName,
     })
-    costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
-    recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
+    costTables = createCostTables({ workbenchDir: stores.workbenchDir })
+    recordings = createRecordingStore({ root: stores.recordingsRoot })
   }
   /** ASR 会话的事件订阅者：sessionId → SSE 响应对象。 */
   const asrSubscribers = new Map()
@@ -944,6 +984,8 @@ export function apply(ctx, config) {
             vaultRoot,
             sopDir: typeof body.sopDir === 'string' && body.sopDir.trim() !== '' ? body.sopDir.trim() : '00 资料库',
             obsidianVaultName: typeof body.obsidianVaultName === 'string' ? body.obsidianVaultName.trim() : '',
+            // 保存库配置时保留当前项目，避免把项目"重置"回公共库
+            currentProject: typeof settings.currentProject === 'string' ? settings.currentProject : '',
             workbenchDir: typeof body.workbenchDir === 'string' && body.workbenchDir.trim() !== '' ? body.workbenchDir.trim() : 'Workbench',
             recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : '会议记录',
             dataDir: typeof body.dataDir === 'string' && body.dataDir.trim() !== '' ? body.dataDir.trim() : '',
@@ -962,6 +1004,78 @@ export function apply(ctx, config) {
           return writeJson(res, 200, { ok: true, ...configStatus() })
         }
         return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
+      }
+
+      /* ------------------------------------------------------ 项目（按项目分目录） */
+      if (route === '/projects') {
+        if (method === 'GET') {
+          if (settings.vaultRoot === '') return writeJson(res, 200, { ok: true, current: '', projects: [] })
+          let names = []
+          try {
+            const entries = await readdir(join(settings.vaultRoot, '项目'), { withFileTypes: true })
+            names = entries
+              .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+              .map((entry) => entry.name)
+              .sort((left, right) => left.localeCompare(right, 'zh'))
+          } catch {
+            names = []
+          }
+          return writeJson(res, 200, { ok: true, current: stores.project, projects: names })
+        }
+        if (method === 'POST') {
+          if (settings.vaultRoot === '') return writeError(res, 409, 'not_configured', '先配置 Obsidian 库路径')
+          const body = await readJsonBody(req)
+          const name = normalizeProjectName(typeof body.name === 'string' ? body.name : '')
+          if (name === null || name === '') {
+            return writeError(res, 400, 'bad_project', '项目名不能为空，也不能包含 / \\ : * ? " < > |')
+          }
+          const base = join(settings.vaultRoot, '项目', name)
+          try {
+            if ((await stat(base)).isDirectory()) return writeError(res, 409, 'exists', '项目已存在：' + name)
+          } catch {
+            // 不存在才继续创建
+          }
+          await mkdir(join(base, 'Workbench'), { recursive: true })
+          await mkdir(join(base, '00 资料库'), { recursive: true })
+          await mkdir(join(base, '会议记录'), { recursive: true })
+          const fresh = createCostTables({ workbenchDir: join(base, 'Workbench') })
+          for (const kind of COST_TABLE_KINDS) {
+            await writeFile(fresh[kind].file, fresh[kind].serialize([]), 'utf8')
+          }
+          await writeFile(
+            join(base, '00 资料库', '项目说明.md'),
+            '# ' + name + '\n\n- 项目名称：' + name + '\n- 建设单位：\n- 合同金额：\n- 计价方式：\n- 备注：\n',
+            'utf8',
+          )
+          return writeJson(res, 200, { ok: true, name })
+        }
+        return writeError(res, 405, 'method_not_allowed', 'GET or POST')
+      }
+
+      if (route === '/projects/current') {
+        if (method !== 'PUT') return writeError(res, 405, 'method_not_allowed', 'PUT only')
+        if (settings.vaultRoot === '') return writeError(res, 409, 'not_configured', '先配置 Obsidian 库路径')
+        const body = await readJsonBody(req)
+        const name = normalizeProjectName(typeof body.name === 'string' ? body.name : '')
+        if (name === null) return writeError(res, 400, 'bad_project', '项目名不合法')
+        if (name !== '') {
+          try {
+            if (!(await stat(join(settings.vaultRoot, '项目', name))).isDirectory()) {
+              return writeError(res, 400, 'bad_project', '不是项目目录：' + name)
+            }
+          } catch {
+            return writeError(res, 404, 'not_found', '项目不存在：' + name)
+          }
+        }
+        const userConfig = loadUserConfigSync(settings.userConfigFile)
+        await mkdir(dirname(settings.userConfigFile), { recursive: true })
+        await writeFile(
+          settings.userConfigFile,
+          JSON.stringify({ ...userConfig, currentProject: name }, null, 2) + '\n',
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        rebuild()
+        return writeJson(res, 200, { ok: true, ...configStatus() })
       }
 
       /* ------------------------------------------------------ 语音凭据 */

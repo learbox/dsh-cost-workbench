@@ -31,6 +31,21 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 设置页（`settings.section`）同一页管理两件事：vault 路径/子目录（`/config`）与语音凭据
 （`/credentials`，读 `asr.json`，响应只给「已配置」布尔值，绝不回显明文；显式清除走 `clear` 数组）。
 
+## 项目上下文（按项目分目录）
+
+`currentProject` 非空时，`buildStores(settings)` 把三张表、资料库、会议记录都切到
+`<vault>/项目/<项目名>/`；术语表仍读全局 `Workbench/术语表.md`。项目列表来自扫描 `项目/` 子目录；
+新建项目写入空表（`serialize([])`）与 `00 资料库/项目说明.md`。切换项目 = 写 `config.json` 的
+`currentProject` + `rebuild()`，与保存库配置同一套「原地重建」语义。
+
+相关路由：
+
+```
+GET    /projects           项目列表（扫描 <vault>/项目/）
+POST   /projects           新建项目（建 Workbench / 00 资料库 / 会议记录 + 空表）
+PUT    /projects/current   切换当前项目（name 为空串 = 公共库）
+```
+
 ## 造价三张表：CRUD 机制
 
 三张表共用 `lib/table.js`，`lib/tables.js` 只声明列、主键和落盘文件名（`createCostTables({ workbenchDir })`）：
@@ -117,6 +132,7 @@ patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已�
 |---|---|
 | `cards.json` / `prompts.json` / 术语表 / 三张表 / 笔记 | 刷新页面（每次请求都读盘） |
 | 双模式切换 | 立即（localStorage） |
+| 切换 / 新建项目 | 立即（写 currentProject + 原地重建） |
 | 设置 → 造价工作台里保存配置 | 立即（Host 原地重建，不用重启） |
 | `client.js` | 重启 DSH（打包版没有热重载快捷键） |
 | `index.js` / `lib/*` | 重启 DSH |
