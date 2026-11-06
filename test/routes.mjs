@@ -88,6 +88,10 @@ try {
   await writeFile(join(dataDir, 'cards.json'), JSON.stringify({ cards: [{ id: 'sop', kind: 'sop', title: '资料库', order: 10 }] }), 'utf8')
   await writeFile(join(dataDir, 'prompts.json'), JSON.stringify({ prompts: {} }), 'utf8')
 
+  // 造价项目白名单：只有列在这里的会话工作区才按项目写目录
+  const projectDir = join(tmp.dir, '项目工作区')
+  await mkdir(projectDir, { recursive: true })
+
   const call = await mount({
     vaultRoot,
     sopDir: siteDir,
@@ -175,11 +179,11 @@ try {
   check('变更签证删除 200', (await call('DELETE', '/changes/' + changeAdded.json.entry.id)).status === 200)
 
   /* ---------------------------------------------- 会话工作区 = 项目根 */
-  const projectDir = join(tmp.dir, '项目工作区')
-  await mkdir(projectDir, { recursive: true })
   await writeFile(join(tmp.dir, 'workspace-index.json'), JSON.stringify({
     tables: { workspaces: { w1: { path: projectDir, sessionIds: ['session-test-1'] } } },
   }), 'utf8')
+  // 标记为造价项目：只有带这个隐藏标记的工作区才进入项目模式
+  await writeFile(join(projectDir, '.dsh-cost-workbench.json'), JSON.stringify({ project: true }), 'utf8')
 
   const ctxOn = await call('POST', '/context', { sessionId: 'session-test-1' })
   check('识别会话工作区为项目根', ctxOn.status === 200 && ctxOn.json.projectRoot === projectDir, ctxOn.raw.slice(0, 160))
@@ -272,6 +276,38 @@ try {
   }
   check('附件越界被拒', (await call('GET', '/attachment?path=' + encodeURIComponent('../outside.png'))).status === 404)
   check('非图片附件被拒', (await call('GET', '/attachment?path=' + encodeURIComponent('造价工作台/计价依据.md'))).status === 404)
+
+  /* ---------------------------------------------- 未标记 / 普通工作区 */
+  const otherDir = join(tmp.dir, '普通工作区')
+  await mkdir(otherDir, { recursive: true })
+  await writeFile(join(tmp.dir, 'workspace-index.json'), JSON.stringify({
+    tables: {
+      workspaces: {
+        w1: { path: projectDir, sessionIds: ['session-test-1'] },
+        w2: { path: otherDir, sessionIds: ['session-test-2'] },
+      },
+    },
+  }), 'utf8')
+
+  // 未标记：状态 none，不写造价目录
+  const ctxNone = await call('POST', '/context', { sessionId: 'session-test-2' })
+  check('未标记工作区 marked=none', ctxNone.status === 200 && ctxNone.json.marked === 'none' && ctxNone.json.project === '', ctxNone.raw.slice(0, 160))
+  check('未标记工作区不写造价目录', await access(join(otherDir, '造价工作台')).then(() => false, () => true))
+
+  // 第一次询问选「普通工作区」：写标记 plain，不写目录
+  const markPlain = await call('POST', '/context/mark', { enable: false })
+  check('标为普通工作区', markPlain.status === 200 && markPlain.json.marked === 'plain' && markPlain.json.project === '', markPlain.raw.slice(0, 160))
+  check('普通工作区不写造价目录', await access(join(otherDir, '造价工作台')).then(() => false, () => true))
+  check('普通标记文件存在', await access(join(otherDir, '.dsh-cost-workbench.json')).then(() => true, () => false))
+
+  // 反悔：改成造价项目 → 立即初始化目录
+  const markProject = await call('POST', '/context/mark', { enable: true })
+  check('改为造价项目', markProject.status === 200 && markProject.json.marked === 'project' && markProject.json.project === '普通工作区', markProject.raw.slice(0, 160))
+  check('改为造价项目后初始化目录', await readFile(join(otherDir, '造价工作台', '计价依据.md'), 'utf8').then((text) => text.includes('# 计价依据速查'), () => false))
+
+  // 只读状态查询（入口按钮用）
+  const statusProject = await call('GET', '/context/status?sessionId=' + encodeURIComponent('session-test-1'))
+  check('status 查询返回项目标记', statusProject.status === 200 && statusProject.json.marked === 'project', statusProject.raw.slice(0, 160))
 
   const ctxOff = await call('POST', '/context', { sessionId: '' })
   check('清空会话后回退公共库', ctxOff.status === 200 && ctxOff.json.project === '')

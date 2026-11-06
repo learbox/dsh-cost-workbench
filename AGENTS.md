@@ -35,8 +35,11 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 ## 项目上下文（会话工作区 = 项目根）
 
 客户端打开面板时 `POST /context { sessionId }`；Host 读 `~/.dsh/storages/workspace.json`
-（可用 `workspaceIndexFile` 覆盖，测试用），把该会话绑定的工作区路径当作项目根，
-然后 `rebuild()`：
+（可用 `workspaceIndexFile` 覆盖，测试用），把该会话绑定的工作区路径当作项目根。
+只有工作区根存在隐藏标记 `.dsh-cost-workbench.json` 且 `project: true` 才进入项目模式；
+未标记或 `project: false`（普通工作区）回退公共库。`/context/status` 是只读查询（入口按钮据此隐藏
+普通工作区），`/context/mark { enable }` 写标记并按需初始化；两者都要过 `readWorkspaceMarker()`。
+进入项目模式后 `rebuild()`：
 
 - `vaultRoot = 项目根`，`sopDir = ''`（资料库就是项目文件夹本身）
 - 三张表 → `<项目根>/造价工作台/`
@@ -58,7 +61,9 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 ```
 GET    /attachment?path=<相对项目根的路径>   只读图片附件（也支持 ?name=<文件名> 在项目根内按名查找）
 GET    /vendor?name=mermaid.min.js|highlight.min.js   按需下发 vendor 脚本（白名单）
-POST   /context                             解析会话工作区并重建（sessionId 为空 = 回退公共库）
+GET    /context/status?sessionId=   只读查询工作区标记（none / project / plain）
+POST   /context                     解析会话工作区并重建（sessionId 为空 = 回退公共库）
+POST   /context/mark { enable }     写工作区标记：true=造价项目（初始化目录）/ false=普通工作区
 ```
 
 识别到项目后会调用 `ensureProjectLayout()` 幂等创建 `造价工作台/`、`会议记录/` 与缺失的空表；

@@ -1639,12 +1639,30 @@ const WB_CALC = {
 
         /* --------------------------------------------------------- 头部按钮 */
 
+        /** 普通工作区（标记为 plain）隐藏工作台入口；未标记/造价项目正常显示。 */
+        function useWorkbenchVisible(sessionId) {
+          const [hidden, setHidden] = React.useState(false)
+          React.useEffect(() => {
+            let alive = true
+            const id = typeof sessionId === 'string' ? sessionId : ''
+            if (id === '') return () => { alive = false }
+            api('/context/status?sessionId=' + encodeURIComponent(id)).then(
+              (data) => { if (alive) setHidden(data !== null && data.marked === 'plain') },
+              () => { /* 查询失败时不隐藏，避免误伤 */ },
+            )
+            return () => { alive = false }
+          }, [sessionId])
+          return hidden
+        }
+
         function HeaderButton(props) {
           const t = makeT(useLanguage())
+          const hidden = useWorkbenchVisible(props?.sessionId)
           React.useEffect(() => {
             activeSession.sessionId = props?.sessionId ?? null
             activeSession.panelProps = props ?? {}
           })
+          if (hidden) return null
           return h('button',
             {
               type: 'button',
@@ -1660,10 +1678,12 @@ const WB_CALC = {
         /** 新会话（还没有消息）时也会显示的紧凑入口：空会话没有会话头部，图标按钮在那儿看不到。 */
         function HeroWorkbenchButton(props) {
           const t = makeT(useLanguage())
+          const hidden = useWorkbenchVisible(props?.sessionId)
           React.useEffect(() => {
             activeSession.sessionId = props?.sessionId ?? null
             activeSession.panelProps = props ?? {}
           })
+          if (hidden) return null
           return h('button',
             {
               type: 'button',
@@ -1859,8 +1879,7 @@ const WB_CALC = {
           React.useEffect(() => {
             let alive = true
             const id = typeof props.sessionId === 'string' ? props.sessionId : ''
-            api('/context', { method: 'POST', body: { sessionId: id } }).then(
-              (data) => {
+            api('/context', { method: 'POST', body: { sessionId: id } }).then(              (data) => {
                 if (!alive) return
                 setProjectInfo(data)
                 setReloadKey((value) => value + 1)
@@ -1878,6 +1897,13 @@ const WB_CALC = {
             )
             return () => { alive = false }
           }, [reloadKey])
+
+          function markProject(enable) {
+            api('/context/mark', { method: 'POST', body: { enable } }).then(
+              (data) => { setProjectInfo(data); setReloadKey((value) => value + 1) },
+              (error) => setFlash('设置失败：' + error.message),
+            )
+          }
 
           React.useEffect(() => {
             let alive = true
@@ -2292,6 +2318,18 @@ const WB_CALC = {
             return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': fontSize + 'px' } },
               h(StyleDefs, null),
               head,
+              projectInfo !== null && typeof projectInfo.workspace === 'string' && projectInfo.workspace !== ''
+                ? h('div', { className: 'dsh-wb-warn', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' } },
+                    h('span', { style: { flex: '1 1 150px' } },
+                      projectInfo.marked === 'plain'
+                        ? '当前是普通工作区，数据在公共库。'
+                        : '这个工作区是造价项目吗？'),
+                    h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => markProject(true) }, '设为造价项目'),
+                    projectInfo.marked === 'none'
+                      ? h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => markProject(false) }, '普通工作区')
+                      : null,
+                  )
+                : null,
               liteMode || focusMode ? null : stripRow,
               liteMode || focusMode ? null : tabs,
               searchRow,

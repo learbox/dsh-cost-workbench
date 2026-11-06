@@ -505,23 +505,39 @@ async function readWorkspaceIndex(file) {
  */
 function buildStores(settings, workspacePath = '') {
   const projectRoot = typeof workspacePath === 'string' ? workspacePath.trim() : ''
-  if (projectRoot !== '') {
+  if (projectRoot === '') {
+    // 普通工作区 / 未标记：回退公共库，绝不在工作区里写 造价工作台/会议记录
     return {
-      project: basename(projectRoot),
-      projectRoot,
-      sopDir: '',
-      recordingsRoot: join(projectRoot, '会议记录'),
-      workbenchDir: join(projectRoot, '造价工作台'),
-      backupDir: join(projectRoot, '造价工作台', '.backups'),
+      project: '',
+      projectRoot: settings.vaultRoot,
+      sopDir: settings.sopDir,
+      recordingsRoot: join(settings.vaultRoot, settings.recordingsDir),
+      workbenchDir: join(settings.vaultRoot, settings.workbenchDir),
+      backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
     }
   }
   return {
-    project: '',
-    projectRoot: settings.vaultRoot,
-    sopDir: settings.sopDir,
-    recordingsRoot: join(settings.vaultRoot, settings.recordingsDir),
-    workbenchDir: join(settings.vaultRoot, settings.workbenchDir),
-    backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+    project: basename(projectRoot),
+    projectRoot,
+    sopDir: '',
+    recordingsRoot: join(projectRoot, '会议记录'),
+    workbenchDir: join(projectRoot, '造价工作台'),
+    backupDir: join(projectRoot, '造价工作台', '.backups'),
+  }
+}
+
+/** 工作区的项目标记文件（隐藏在工作区根）：{ project: true|false }。 */
+const PROJECT_MARKER = '.dsh-cost-workbench.json'
+
+/** 读标记：none（没标记）/ project（造价项目）/ plain（普通工作区）。 */
+async function readWorkspaceMarker(workspace) {
+  const text = typeof workspace === 'string' ? workspace.trim() : ''
+  if (text === '') return 'none'
+  try {
+    const parsed = JSON.parse(await readFile(join(text, PROJECT_MARKER), 'utf8'))
+    return parsed !== null && typeof parsed === 'object' && parsed.project === true ? 'project' : 'plain'
+  } catch {
+    return 'none'
   }
 }
 
@@ -704,6 +720,8 @@ async function serveAudio(req, res, filePath) {
 export function apply(ctx, config) {
   /** 当前会话工作区（= 项目根）；由客户端 POST /context 告知，空则回退公共库。 */
   let sessionWorkspace = ''
+  /** 当前会话的工作区路径（无论是否造价项目），标记接口用它定位。 */
+  let contextWorkspace = ''
   let settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
   let stores = buildStores(settings, sessionWorkspace)
   let vault = createVaultStore({
@@ -1242,12 +1260,54 @@ export function apply(ctx, config) {
           const index = await readWorkspaceIndex(settings.workspaceIndexFile)
           workspace = index.get(sessionId) ?? index.get('session-' + sessionId) ?? ''
         }
-        sessionWorkspace = workspace
+        contextWorkspace = workspace
+        // 只有标记为「造价项目」的工作区才进入项目模式；未标记/普通 → 公共库
+        const marked = await readWorkspaceMarker(workspace)
+        sessionWorkspace = marked === 'project' ? workspace : ''
         rebuild()
-        const layout = await ensureProjectLayout(stores)
+        const layout = sessionWorkspace === '' ? { ok: true } : await ensureProjectLayout(stores)
         return writeJson(res, 200, {
           ok: true,
           sessionId,
+          workspace,
+          marked,
+          project: stores.project,
+          projectRoot: stores.projectRoot,
+          initialized: layout.ok === true,
+        })
+      }
+
+      // 只读查询：会话对应工作区的标记状态（入口按钮用它决定显示/隐藏，不触发重建）
+      if (route === '/context/status') {
+        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const sessionId = (url.searchParams.get('sessionId') ?? '').trim()
+        let workspace = ''
+        if (sessionId !== '') {
+          const index = await readWorkspaceIndex(settings.workspaceIndexFile)
+          workspace = index.get(sessionId) ?? index.get('session-' + sessionId) ?? ''
+        }
+        return writeJson(res, 200, { ok: true, workspace, marked: await readWorkspaceMarker(workspace) })
+      }
+
+      // 首次询问的答案：把当前会话工作区标记成造价项目或普通工作区（写隐藏文件到工作区根）
+      if (route === '/context/mark') {
+        if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
+        if (contextWorkspace === '') return writeError(res, 400, 'bad_request', '还没有识别到当前会话的工作区')
+        const body = await readJsonBody(req)
+        const enable = body.enable === true
+        try {
+          const markFile = join(contextWorkspace, PROJECT_MARKER)
+          await writeFile(markFile, JSON.stringify({ project: enable, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+        } catch (error) {
+          return writeError(res, 500, 'mark_failed', '写项目标记失败：' + describe(error))
+        }
+        sessionWorkspace = enable ? contextWorkspace : ''
+        rebuild()
+        const layout = enable ? await ensureProjectLayout(stores) : { ok: true }
+        return writeJson(res, 200, {
+          ok: true,
+          workspace: contextWorkspace,
+          marked: enable ? 'project' : 'plain',
           project: stores.project,
           projectRoot: stores.projectRoot,
           initialized: layout.ok === true,
