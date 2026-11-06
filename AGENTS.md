@@ -114,18 +114,16 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |
-| `sidebar.footer.action` | 无 id（list slot） | 侧栏底部「造价工作区」区块：列出已标记为造价的工作区及其会话（与官方列表分开），点击会话 `ctx.uiWorkspace.openSession`；「+」新建（选目录 → `ctx.workspaces.create` + `/project/mark`） |
 | `settings.section` | id `dsh-cost-workbench` | 「设置」新增一个造价工作台分区（库路径/子目录，组件收到 `{ close }`） |
 | `settings.section.icon` | id `dsh-cost-workbench` | 上一条导航行的图标（id 必须一致） |
 
 **不要尝试接管 `sidebar.workspaces.directoryFlow`**：它是 single slot，原生目录选择器已经占着它，
-插件再 register 不会生效（实测「添加工作区」仍走原生流程）。要加工作区入口就用 `sidebar.footer.action`（list）。
+插件再 register 不会生效（实测「添加工作区」仍走原生流程）。侧栏底部也不放独立区块（与官方列表重复，已移除）。
 
 **官方工作区列表不可分组**：`sidebar.workspaces` 是 single slot，由官方插件独占渲染，插件无法把它拆成
-「普通/造价」两段（试图接管 `sidebar.workspaces.directoryFlow` 也不会生效）。折中做法在
-`CostWorkspaceSection`（`sidebar.footer.action`）里：加载时把标记为造价的工作区 `rename` 成
-「造价 · 名称」并 `insertBefore(id, undefined)` 排到末尾；取消标记时会去前缀。改这段注意别每 5 秒重复
-rename（先判断是否已带前缀/已排末尾）。
+「普通/造价」两段。折中做法在 `apply()` 里的 `syncCostLayout()`：后台每 5 秒把标记为造价的工作区
+`rename` 成「造价 · 名称」并 `insertBefore(id, undefined)` 排到末尾；取消标记时会去前缀。改这段注意别
+重复 rename（先判断是否已带前缀/已排末尾）。
 
 客户端标识（slot id、`TAB_ID`、`TAB_KIND`）仍是 `dsh-workbench` 前缀，与包名 `dsh-cost-workbench`、
 patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已保存的面板状态失效。改之前先读 `client.js`

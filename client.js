@@ -1420,7 +1420,7 @@ const WB_CALC = {
     }
 
     return {
-      inject: ['slots', 'workspaces', 'sessions', 'uiWorkspace'],
+      inject: ['slots', 'workspaces'],
       _calc: WB_CALC,
       _md: renderMarkdown,
       apply(ctx) {
@@ -1696,142 +1696,67 @@ const WB_CALC = {
           )
         }
 
-        /**
-         * 侧栏底部的「造价工作区」独立区块：只列出已标记为造价项目的工作区及其会话，
-         * 与官方工作区列表分开；点击会话直接打开。右上角「+」= 新建造价工作区。
-         */
-        function CostWorkspaceSection() {
-          const [rows, setRows] = React.useState([])
-          const [busy, setBusy] = React.useState(false)
-          const [tick, setTick] = React.useState(0)
-          React.useEffect(() => {
-            let alive = true
-            const load = async () => {
-              try {
-                const snapshot = ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.list?.getSnapshot === 'function'
-                  ? ctx.workspaces.list.getSnapshot()
-                  : null
-                const list = Array.isArray(snapshot?.items) ? snapshot.items : (Array.isArray(snapshot) ? snapshot : [])
-                const sessions = ctx.sessions !== undefined && ctx.sessions !== null && typeof ctx.sessions.list?.getSnapshot === 'function'
-                  ? ctx.sessions.list.getSnapshot()
-                  : { byId: {} }
-                const next = []
-                const PREFIX = '造价 · '
-                const renameTasks = []
-                const projectIds = []
-                const allIds = []
-                for (const workspace of Array.isArray(list) ? list : []) {
-                  const path = typeof workspace?.path === 'string' ? workspace.path : ''
-                  const id = String(workspace?.workspaceId ?? workspace?.id ?? path)
-                  if (path !== '') allIds.push(id)
-                  if (path === '') continue
-                  const status = await api('/project/status?path=' + encodeURIComponent(path)).catch(() => null)
-                  const isProject = status !== null && status.marked === 'project'
-                  const rawTitle = typeof workspace?.title === 'string' && workspace.title !== '' ? workspace.title : (path.split(/[\\/]/).pop() ?? path)
-                  const bareTitle = rawTitle.startsWith(PREFIX) ? rawTitle.slice(PREFIX.length) : rawTitle
-                  if (!isProject) {
-                    if (rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: bareTitle })
-                    continue
-                  }
-                  projectIds.push(id)
-                  if (!rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: PREFIX + bareTitle })
-                  const sessionIds = Array.isArray(workspace?.sessionIds) ? workspace.sessionIds : []
-                  next.push({
-                    id,
-                    path,
-                    title: bareTitle,
-                    sessions: sessionIds
-                      .map((sessionId) => ({ id: sessionId, title: String(sessions?.byId?.[sessionId]?.title ?? '') }))
-                      .filter((item) => item.title !== ''),
-                  })
-                }
-                // 折中布局：造价工作区统一排到最后（官方列表不可分组）；标题加「造价 ·」前缀
-                if (alive && renameTasks.length > 0 && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.rename === 'function') {
-                  for (const task of renameTasks) {
-                    try { await ctx.workspaces.rename(task.id, task.title) } catch { /* 单个失败忽略 */ }
-                  }
-                }
-                const firstProject = allIds.findIndex((id) => projectIds.includes(id))
-                const lastNormal = allIds.reduce((acc, id, index) => (projectIds.includes(id) ? acc : index), -1)
-                if (alive && firstProject !== -1 && firstProject < lastNormal && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.insertBefore === 'function') {
-                  for (const id of projectIds) {
-                    try { await ctx.workspaces.insertBefore(id, undefined) } catch { /* 单个失败忽略 */ }
-                  }
-                }
-                if (alive) setRows(next)
-              } catch {
-                if (alive) setRows([])
+        /** 同步造价工作区的展示布局：标题加「造价 ·」前缀并排到官方列表最后（后台执行，不占侧栏 UI）。 */
+        const syncCostLayout = async () => {
+          try {
+            const snapshot = ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.list?.getSnapshot === 'function'
+              ? ctx.workspaces.list.getSnapshot()
+              : null
+            const list = Array.isArray(snapshot?.items) ? snapshot.items : []
+            if (list.length === 0) return
+            const PREFIX = '造价 · '
+            const renameTasks = []
+            const projectIds = []
+            const allIds = []
+            for (const workspace of list) {
+              const path = typeof workspace?.path === 'string' ? workspace.path : ''
+              const id = String(workspace?.workspaceId ?? workspace?.id ?? path)
+              if (path !== '') allIds.push(id)
+              if (path === '') continue
+              const status = await api('/project/status?path=' + encodeURIComponent(path)).catch(() => null)
+              const isProject = status !== null && status.marked === 'project'
+              const rawTitle = typeof workspace?.title === 'string' && workspace.title !== '' ? workspace.title : (path.split(/[\\/]/).pop() ?? path)
+              const bareTitle = rawTitle.startsWith(PREFIX) ? rawTitle.slice(PREFIX.length) : rawTitle
+              if (!isProject) {
+                if (rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: bareTitle })
+                continue
+              }
+              projectIds.push(id)
+              if (!rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: PREFIX + bareTitle })
+            }
+            if (renameTasks.length > 0 && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.rename === 'function') {
+              for (const task of renameTasks) {
+                try { await ctx.workspaces.rename(task.id, task.title) } catch { /* 单个失败忽略 */ }
               }
             }
-            load()
-            const timer = setInterval(load, 5000)
-            return () => { alive = false; clearInterval(timer) }
-          }, [tick])
-          const create = () => {
-            if (busy) return
-            setBusy(true)
-            api('/pick-folder', { method: 'POST', body: {} }).then(
-              (data) => {
-                if (data === null || data.cancelled === true) return null
-                const target = typeof data.path === 'string' ? data.path.trim() : ''
-                if (target === '') return null
-                const workspaces = ctx.workspaces
-                if (workspaces === undefined || workspaces === null || typeof workspaces.create !== 'function') {
-                  window.alert('当前 DSH 版本不支持插件创建工作区')
-                  return null
-                }
-                return workspaces.create({ path: target }).then(() =>
-                  api('/project/mark', { method: 'POST', body: { path: target, enable: true } }),
-                ).then(() => setTick((value) => value + 1))
-              },
-              (error) => window.alert('选择文件夹失败：' + error.message),
-            ).catch((error) => window.alert('创建失败：' + error.message)).finally(() => setBusy(false))
+            const firstProject = allIds.findIndex((id) => projectIds.includes(id))
+            const lastNormal = allIds.reduce((acc, id, index) => (projectIds.includes(id) ? acc : index), -1)
+            if (firstProject !== -1 && firstProject < lastNormal && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.insertBefore === 'function') {
+              for (const id of projectIds) {
+                try { await ctx.workspaces.insertBefore(id, undefined) } catch { /* 单个失败忽略 */ }
+              }
+            }
+          } catch {
+            // 布局同步失败不影响其它功能
           }
-          const openSession = (sessionId) => {
-            const target = ctx.uiWorkspace
-            if (target === undefined || target === null || typeof target.openSession !== 'function') return
-            target.openSession(sessionId)
-          }
-          const rowStyle = { display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 4px', fontSize: '12px', lineHeight: '1.5', minWidth: 0 }
-          const sessionStyle = {
-            display: 'block', width: '100%', textAlign: 'left', padding: '1px 4px 1px 14px', fontSize: '12px',
-            lineHeight: '1.5', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer',
-            opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }
-          return h('div', { style: { padding: '2px 4px 4px', minWidth: 0 } },
-            h('div', { style: { ...rowStyle, opacity: 0.6, paddingTop: 0 } },
-              h('span', { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '造价工作区'),
-              h('button', {
-                type: 'button',
-                title: '新建造价项目工作区（选文件夹后自动建目录+标记）',
-                disabled: busy,
-                onClick: create,
-                style: { background: 'none', border: 'none', color: 'inherit', cursor: busy ? 'default' : 'pointer', fontSize: '13px', lineHeight: 1, padding: '0 2px' },
-              }, busy ? '…' : '+'),
-            ),
-            rows.length === 0
-              ? h('div', { style: { ...rowStyle, opacity: 0.5 } }, '还没有造价工作区')
-              : rows.map((workspace) => h('div', { key: workspace.id },
-                  h('div', { style: { ...rowStyle, opacity: 0.85 }, title: workspace.path },
-                    h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, workspace.title),
-                  ),
-                  workspace.sessions.slice(0, 6).map((session) => h('button', {
-                    key: session.id,
-                    type: 'button',
-                    title: session.title,
-                    style: sessionStyle,
-                    onClick: () => openSession(session.id),
-                  }, '· ' + session.title)),
-                )),
-          )
         }
 
-        // 侧栏底部「造价工作区」独立区块（list slot 必须带 id）
+        // 后台同步造价工作区布局（不再占用侧栏 UI）
         try {
-          ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-cost-workspace' }, CostWorkspaceSection))
+          if (typeof ctx.effect === 'function') {
+            ctx.effect(() => {
+              void syncCostLayout()
+              const timer = setInterval(() => { void syncCostLayout() }, 5000)
+              return () => clearInterval(timer)
+            })
+          } else {
+            void syncCostLayout()
+            setInterval(() => { void syncCostLayout() }, 5000)
+          }
         } catch (error) {
-          console.warn('[dsh-workbench] 侧栏底部区块注册失败：', error instanceof Error ? error.message : String(error))
+          console.warn('[dsh-workbench] 造价工作区布局同步启动失败：', error instanceof Error ? error.message : String(error))
         }
+
 
         // 全屏工作台（shell.overlay）+ Alt+W 热键（macOS 上是 ⌥W）
         try {
