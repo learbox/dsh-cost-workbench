@@ -172,7 +172,8 @@ node test/routes.mjs        # 只跑路由套件（调试时用）
 
 - 图片按 `![[图.png]]` / `![](相对路径)` 渲染：客户端把链接转成 `/attachment` 请求，Host 只在
   项目根内找图片（路径越界拒绝；只给文件名时限深 6 层、最多 800 个目录按名查找）；非图片附件仍显示文件名。
-- Markdown 渲染刻意精简（标题、列表、加粗、代码、双链、frontmatter）。
+- Markdown 用内联的 marked（`vendor/marked.min.js`，MIT）渲染完整 GFM；原始 HTML 允许执行（用户选择）。
+  `renderMarkdown()` 先处理 Obsidian 的 `![[图片]]` 与 `[[双链]]` 再交给 marked；mermaid/内嵌 PDF 不渲染。
 - 批注锚定到多行选择的起始行；高亮颜色固定。
 - 导入音频转写没有进度条。
 - 三张表没有跨进程写锁：工作台与 Obsidian 同时改同一个表文件时，后写的一方可能覆盖前一方（有 `.bak` 兜底）。

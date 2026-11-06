@@ -16,6 +16,7 @@
     "lib/**/*.js",
     "locale/*.json",
     "icon.svg",
+    "vendor/**",
     "scripts/**",
     "README.md",
     "README.en.md",

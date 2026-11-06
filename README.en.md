@@ -246,7 +246,9 @@ your recordings.
   path, or by filename inside the project folder — just keep images in the project folder.
 - If an image cannot be found it falls back to a filename label; non-image attachments
   (PDF/Excel/Word) still appear as filename labels.
-- Markdown support is deliberately minimal: no HTML, no embedded PDFs, no mermaid.
+- **Markdown renders through marked** (full GFM: tables, fenced code, quotes, task lists, strikethrough,
+  nested lists, autolinks); mermaid and embedded PDFs are still not rendered. **Raw HTML is executed
+  as written** (opened by your choice).
 - Annotations anchor to the **first line** of a multi-line selection; the highlight colour is fixed.
 - Transcribing an imported audio file shows no progress bar.
 - **Chinese characters and spaces in paths are fine**, but use absolute paths in the config.
