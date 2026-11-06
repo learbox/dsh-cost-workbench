@@ -28,6 +28,25 @@ window.__ModuleLoader__.load({
     const API = '/api/dsh-workbench'
     /** 当前打开工作台的会话；api() 会自动带上 sessionId，让 Host 按会话隔离上下文。 */
     let currentSessionId = null
+    /** 资料库树的展开状态（localStorage 记忆，跨打开/刷新保留）。 */
+    const EXPANDED_KEY = 'dsh-cost-workbench.expanded'
+    function loadExpandedState() {
+      try {
+        const raw = window.localStorage.getItem(EXPANDED_KEY)
+        if (raw === null) return {}
+        const parsed = JSON.parse(raw)
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+      } catch {
+        return {}
+      }
+    }
+    function saveExpandedState(value) {
+      try {
+        window.localStorage.setItem(EXPANDED_KEY, JSON.stringify(value))
+      } catch {
+        // 隐私模式下写不了 localStorage 也不影响使用
+      }
+    }
 
     /* vendor/marked.min.js (MIT, https://github.com/markedjs/marked) — 完整 Markdown 渲染 */
     const marked = (function () {
@@ -2941,7 +2960,7 @@ function CalcCard({ t }) {
           const [findText, setFindText] = React.useState('')
           const [findPos, setFindPos] = React.useState(0)
           const [liveLines, setLiveLines] = React.useState([])
-          const [expanded, setExpanded] = React.useState({})
+          const [expanded, setExpanded] = React.useState(loadExpandedState)
           const [busy, setBusy] = React.useState(false)
           const lastLoaded = React.useRef(0)
           const currentPath = React.useRef(null)
@@ -2997,23 +3016,29 @@ function CalcCard({ t }) {
             if (typeof onFocusHandled === 'function') onFocusHandled()
           }, [focusNote])
 
-          // 第一次拿到目录树时默认展开：除 PDF 之外的所有文件夹（PDF 里没有笔记，展开只是噪音）。
-          // 只做一次——你手动收起的文件夹不会被强制再展开。
+          // 首次见到某个文件夹时按默认展开（含笔记的目录展开，PDF 不展开）；已有记忆的保持不变。
           React.useEffect(() => {
             const tree = state.status === 'ready' && Array.isArray(state.data.tree) ? state.data.tree : []
             if (tree.length === 0) return
             setExpanded((previous) => {
-              if (Object.keys(previous).length > 0) return previous
-              const next = {}
+              let changed = false
+              const next = { ...previous }
               const walk = (nodes) => {
                 for (const node of nodes) {
                   if (node.type !== 'dir') continue
-                  const top = String(node.path).split('/')[0]
-                  if (top.toLowerCase() !== 'pdf' && node.count > 0) next[node.path] = true
+                  if (!(node.path in previous)) {
+                    const top = String(node.path).split('/')[0]
+                    if (top.toLowerCase() !== 'pdf' && node.count > 0) {
+                      next[node.path] = true
+                      changed = true
+                    }
+                  }
                   walk(node.children)
                 }
               }
               walk(tree)
+              if (!changed) return previous
+              saveExpandedState(next)
               return next
             })
           }, [state])
@@ -3026,7 +3051,11 @@ function CalcCard({ t }) {
           }, [refreshTick, load])
 
           function toggleDir(path) {
-            setExpanded((previous) => ({ ...previous, [path]: previous[path] !== true }))
+            setExpanded((previous) => {
+              const next = { ...previous, [path]: previous[path] !== true }
+              saveExpandedState(next)
+              return next
+            })
           }
 
           function openEditor() {
