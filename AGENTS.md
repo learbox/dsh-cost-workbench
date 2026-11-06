@@ -114,6 +114,7 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |
+| `sidebar.workspaces.directoryFlow` | 无 id（single slot） | 接管「添加工作区」流程：选目录后问「是否造价项目」，是则 `/project/mark` 建目录+标记再 `onPicked` |
 | `settings.section` | id `dsh-cost-workbench` | 「设置」新增一个造价工作台分区（库路径/子目录，组件收到 `{ close }`） |
 | `settings.section.icon` | id `dsh-cost-workbench` | 上一条导航行的图标（id 必须一致） |
 

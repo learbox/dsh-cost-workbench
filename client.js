@@ -1420,7 +1420,7 @@ const WB_CALC = {
     }
 
     return {
-      inject: ['slots', 'workspaces'],
+      inject: ['slots', 'workspaces', 'uiWorkspace'],
       _calc: WB_CALC,
       _md: renderMarkdown,
       apply(ctx) {
@@ -1694,6 +1694,91 @@ const WB_CALC = {
             h(Icon, { size: 14 }),
             h('span', { style: { marginLeft: '2px' } }, t('tab.title')),
           )
+        }
+
+        /**
+         * 「添加工作区」流程：先调 pick() 选目录，再问一句「是否造价项目」。
+         * 是 → 调 Host /project/mark 建目录+标记；然后照常 onPicked 交回工作区创建。
+         * 否/取消 → 不动任何目录，直接继续原生创建流程。
+         */
+        function CostDirectoryFlow(props) {
+          const [pending, setPending] = React.useState(null)
+          const [busy, setBusy] = React.useState(false)
+          const armed = React.useRef(false)
+          const alive = React.useRef(true)
+          const outcome = React.useRef(props)
+          outcome.current = props
+          React.useEffect(() => {
+            alive.current = true
+            return () => { alive.current = false }
+          }, [])
+          React.useEffect(() => {
+            if (!props.open) {
+              armed.current = false
+              setPending(null)
+              return
+            }
+            if (armed.current) return
+            armed.current = true
+            const pick = typeof props.pick === 'function' ? props.pick() : Promise.resolve(null)
+            Promise.resolve(pick).then(
+              (path) => {
+                if (!alive.current) return
+                if (typeof path !== 'string' || path === '') outcome.current.onCancel()
+                else setPending({ path })
+              },
+              (reason) => {
+                if (!alive.current) return
+                outcome.current.onError(reason instanceof Error ? reason.message : String(reason))
+              },
+            )
+          }, [props.open, props.pick])
+          if (pending === null) return null
+          const finish = (enable) => {
+            if (busy) return
+            const path = pending.path
+            if (enable !== true) {
+              setPending(null)
+              outcome.current.onPicked(path)
+              return
+            }
+            setBusy(true)
+            api('/project/mark', { method: 'POST', body: { path, enable: true } }).then(
+              () => { setPending(null); setBusy(false); outcome.current.onPicked(path) },
+              () => { setPending(null); setBusy(false); outcome.current.onPicked(path) },
+            )
+          }
+          return h('div', {
+            className: 'dsh-wb-modal-backdrop',
+            style: { zIndex: 90, pointerEvents: 'auto' },
+            onClick: () => { if (!busy) { setPending(null); outcome.current.onCancel() } },
+          },
+            h('div', { className: 'dsh-wb-modal', style: { width: '440px', maxWidth: '92vw' }, onClick: (event) => event.stopPropagation() },
+              h('div', { className: 'dsh-wb-modal-title' }, '这个工作区是造价项目吗？'),
+              h('div', { className: 'dsh-wb-note', style: { marginTop: '8px', wordBreak: 'break-all' } }, pending.path),
+              h('div', { className: 'dsh-wb-note', style: { marginTop: '4px' } },
+                '是 → 自动建好 造价工作台/ 与 会议记录/；否 → 按普通工作区添加，不写任何目录。'),
+              h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px', flexWrap: 'wrap' } },
+                h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: () => finish(true) }, busy ? '处理中…' : '是，造价项目'),
+                h('button', { type: 'button', className: 'dsh-wb-btn', disabled: busy, onClick: () => finish(false) }, '普通工作区'),
+                h('button', { type: 'button', className: 'dsh-wb-btn', disabled: busy, onClick: () => { setPending(null); outcome.current.onCancel() } }, '取消'),
+              ),
+            ),
+          )
+        }
+
+        // 接管「添加工作区」的目录选择流程（DSH 公开 slot）：选目录后多问一句是否造价项目
+        try {
+          ctx.slots.inject('sidebar.workspaces.directoryFlow', () => ctx.slots.register({
+            name: 'sidebar.workspaces.directoryFlow',
+            inject: () => ({
+              pick: () => (ctx.uiWorkspace !== undefined && ctx.uiWorkspace !== null && typeof ctx.uiWorkspace.pickDirectory === 'function'
+                ? ctx.uiWorkspace.pickDirectory()
+                : Promise.resolve(null)),
+            }),
+          }, CostDirectoryFlow))
+        } catch (error) {
+          console.warn('[dsh-workbench] 接管添加工作区流程失败：', error instanceof Error ? error.message : String(error))
         }
 
         // 全屏工作台（shell.overlay）+ Alt+W 热键（macOS 上是 ⌥W）
