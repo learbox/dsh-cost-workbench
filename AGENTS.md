@@ -17,7 +17,7 @@ lib/
   tables.js        造价三表：计价依据 / 材料价格 / 变更签证台账
   recordings.js    WAV 拼装、分片追加、波形、转写稿、批注
   volc-asr.js      火山引擎流式 ASR 桥（sessions / chunks / finals），热词表
-  iflyrec.js       讯飞本地 MCP 客户端（整文件转写）
+  volc-auc.js      火山录音文件识别 2.0（整段转写：base64 提交 + 轮询，消耗录音包）
   volc-ws.js       最小 WebSocket 客户端（需要自定义握手头）
   usage.js         用量角标（DeepSeek 余额 + 语音剩余时长）。DeepSeek 余额在客户端优先用账号
                    `ctx.remote.account.getBalance()`（需 inject 'remote'/'remote.account'），
@@ -165,6 +165,11 @@ patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已�
 
 ## 录音与转写
 
+- 两种转写都走火山，共用 `asr.json` 的 `volcengine.apiKey`：
+  - **实时**（会议记录边录边转）：`lib/volc-asr.js` 流式 WebSocket（资源 `volc.seedasr.sauc.duration`）。
+  - **整段**（导入音频 / 重新转写）：`lib/volc-auc.js` 录音文件识别 2.0（`volc.seedasr.auc`，
+    `audio.data` base64 提交 + 轮询 `/bigmodel/query`，消耗「录音文件识别」时长包）。
+- `POST /recordings/:id/transcribe` 固定走火山整段（不再接受 engine 参数）；讯飞 MCP 已移除。
 - 音频在浏览器里拼成 WAV（16k / 16bit / 单声道），按分片追加；finalize 时补文件头，`list()` 会修复孤儿头。
 - WebSocket 放在 Host：火山引擎用握手头鉴权，浏览器发不出去。
 - 会话超时是**按空闲算**的。不要改回绝对时长——那会切掉所有超过 2 分钟的录音。

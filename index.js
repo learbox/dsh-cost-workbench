@@ -42,7 +42,7 @@ import { createCostTables, COST_TABLE_KINDS, entryMatches } from './lib/tables.j
 import { createVaultStore } from './lib/vault.js'
 import { createRecordingStore } from './lib/recordings.js'
 import { createAsrBridge } from './lib/volc-asr.js'
-import { transcribeWithIflyrec } from './lib/iflyrec.js'
+import { transcribeVolcAuc } from './lib/volc-auc.js'
 import { createUsageReader } from './lib/usage.js'
 
 /** 硬依赖：没有 web 服务器就没有路由可注册（非 Web 组合下本插件保持未激活，符合预期）。 */
@@ -930,27 +930,14 @@ export function apply(ctx, config) {
     }
   }
 
-  /** 读 asr.json 里的听见 MCP 配置（只在 Host 内部用）。 */
-  async function readIflyrecConfig() {
-    const parsed = JSON.parse(await readFile(settings.asrConfigFile, 'utf8'))
-    const mcp = parsed?.iflyrecMcp
-    const endpoint = typeof mcp?.endpoint === 'string' && mcp.endpoint !== '' ? mcp.endpoint : 'http://127.0.0.1:3000/sse'
-    const apiKey = typeof mcp?.apiKey === 'string' ? mcp.apiKey : ''
-    if (apiKey === '') throw Object.assign(new Error('asr.json 里没有听见的 apiKey'), { code: 'no_iflyrec_key' })
-    return { endpoint, apiKey }
-  }
-
-  /** 用听见转写已落盘的一条录音。 */
-  async function transcribeWithIflyrecFile(recordingId) {
-    const config = await readIflyrecConfig()
-    const result = await transcribeWithIflyrec({
-      endpoint: config.endpoint,
-      apiKey: config.apiKey,
-      filePath: recordings.audioPath(recordingId),
-    })
-    await writeTranscript(recordingId, result, '讯飞听见（本机 MCP）')
-    // 听见会把结果文件写进录音目录，留着只会让文件夹变乱。
-    await recordings.cleanForeignArtifacts(recordingId)
+  /** 用火山「录音文件识别」2.0 转写已落盘的一条录音（整段转写，消耗录音包）。 */
+  async function transcribeRecordingFile(recordingId) {
+    const asr = await readAsrSettings(settings.asrConfigFile)
+    const apiKey = typeof asr?.volcengine?.apiKey === 'string' ? asr.volcengine.apiKey : ''
+    const wav = await readFile(recordings.audioPath(recordingId))
+    if (wav.length <= 44) throw Object.assign(new Error('这条录音还没有音频数据'), { code: 'empty_audio' })
+    const result = await transcribeVolcAuc(wav, { apiKey, format: 'wav', language: 'zh-CN' })
+    await writeTranscript(recordingId, result, '火山录音文件识别 2.0')
     return result
   }
 
@@ -1725,10 +1712,8 @@ export function apply(ctx, config) {
         }
         if (action === 'transcribe') {
           if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
-          const body = await readJsonBody(req)
-          const engine = body.engine === 'iflyrec' ? 'iflyrec' : 'volc'
-          const result = engine === 'iflyrec' ? await transcribeWithIflyrecFile(id) : await transcribeRecordingFile(id)
-          return writeJson(res, 200, { ok: true, engine, text: result.text, utterances: result.utterances?.length ?? 0 })
+          const result = await transcribeRecordingFile(id)
+          return writeJson(res, 200, { ok: true, engine: 'volc-auc', text: result.text, utterances: result.utterances?.length ?? 0 })
         }
         if (action === 'finalize') {
           if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')

@@ -3035,7 +3035,6 @@ function CalcCard({ t }) {
           const [state, setState] = React.useState({ status: 'loading' })
           const [doc, setDoc] = React.useState(null)
           const [editor, setEditor] = React.useState(null)
-          const [engine, setEngine] = React.useState('volc')
           const [confirming, setConfirming] = React.useState(false)
           const [renaming, setRenaming] = React.useState(null)
           const [annotations, setAnnotations] = React.useState([])
@@ -3680,7 +3679,6 @@ function CalcCard({ t }) {
           const [playing, setPlaying] = React.useState(false)
           const [rate, setRate] = React.useState(1)
           const [progress, setProgress] = React.useState({ time: 0, duration: 0 })
-          const [engine, setEngine] = React.useState('volc')
           const [confirming, setConfirming] = React.useState(false)
           const [renaming, setRenaming] = React.useState(null)
           const [annotations, setAnnotations] = React.useState([])
@@ -4027,7 +4025,7 @@ function CalcCard({ t }) {
               await refresh()
               openRecording({ id: created.id })
               setFlash('音频已保存，正在转写…')
-              await api('/recordings/' + encodeURIComponent(created.id) + '/transcribe', { method: 'POST', body: { engine } })
+              await api('/recordings/' + encodeURIComponent(created.id) + '/transcribe', { method: 'POST', body: {} })
               setFlash('转写完成')
               openRecording({ id: created.id })
               if (typeof onUsageChanged === 'function') onUsageChanged()
@@ -4058,7 +4056,7 @@ function CalcCard({ t }) {
             setImporting(true)
             setFlash('正在重新转写…')
             try {
-              await api('/recordings/' + encodeURIComponent(selected.id) + '/transcribe', { method: 'POST', body: { engine } })
+              await api('/recordings/' + encodeURIComponent(selected.id) + '/transcribe', { method: 'POST', body: {} })
               setFlash('转写完成')
               openRecording({ id: selected.id, title: selected.item?.title, durationMs: selected.item?.durationMs })
               if (typeof onUsageChanged === 'function') onUsageChanged()
@@ -4456,10 +4454,9 @@ function CalcCard({ t }) {
               ),
               h('select', {
                 key: 'engine', className: 'dsh-wb-input dsh-wb-select', style: { width: 'auto', height: '26px' },
-                value: engine, title: '转写引擎', onChange: (event) => setEngine(event.target.value),
+                value: 'volc-auc', title: '转写引擎', disabled: true, onChange: () => {},
               },
-                h('option', { value: 'volc' }, '火山（流式）'),
-                h('option', { value: 'iflyrec' }, '听见（整段）'),
+                h('option', { value: 'volc-auc' }, '火山（整段）'),
               ),
               h('button', { key: 'refresh', type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', onClick: () => { refresh(); setRefreshTick((value) => value + 1) }, title: t('panel.refresh'), 'aria-label': t('panel.refresh') }, h(IconRefresh, null)),
               focusMode ? null : h('button', {

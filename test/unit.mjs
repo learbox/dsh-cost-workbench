@@ -126,6 +126,50 @@ try {
   /* ------------------------------------------------------------ 解析边界 */
   check('sectionsOf 忽略空白开头', sectionsOf('\n\n**一**\n正文\n').length === 1)
   check('sectionsOf 保留开头顶部正文', sectionsOf('前言\n\n**一**\n正文\n')[0].title === '（开头）')
+  /* -------------------------------------------------------- 火山录音文件识别 */
+  {
+    const { transcribeVolcAuc } = await import('../lib/volc-auc.js')
+    const originalFetch = globalThis.fetch
+    const calls = []
+    const makeResponse = (headers, body) => new Response(JSON.stringify(body), { status: 200, headers })
+    try {
+      globalThis.fetch = async (url, init) => {
+        calls.push({ url, init })
+        if (String(url).includes('/submit')) {
+          return makeResponse({ 'x-api-status-code': '20000000', 'x-api-message': 'OK', 'x-api-request-id': 'task-1' }, {})
+        }
+        return makeResponse(
+          { 'x-api-status-code': '20000000', 'x-api-message': 'OK', 'x-api-request-id': 'task-1' },
+          {
+            audio_info: { duration: 3000 },
+            result: {
+              text: '你好 世界',
+              utterances: [
+                { text: '你好', start_time: 0, end_time: 1000 },
+                { text: '世界', start_time: 1000, end_time: 3000 },
+              ],
+            },
+          },
+        )
+      }
+      const result = await transcribeVolcAuc(Buffer.alloc(100), { apiKey: 'test-key', pollMs: 1 })
+      check('火山整段转写返回文本', result.text === '你好 世界', result.text)
+      check('火山整段转写映射分句时间', result.utterances.length === 2 && result.utterances[1].start === 1000, JSON.stringify(result.utterances))
+      check('火山提交带 X-Api-Key 与资源 ID', calls[0].init.headers['X-Api-Key'] === 'test-key' && calls[0].init.headers['X-Api-Resource-Id'] === 'volc.seedasr.auc')
+      check('火山提交带 base64 音频', JSON.parse(calls[0].init.body).audio.data !== '' && JSON.parse(calls[0].init.body).audio.format === 'wav')
+
+      globalThis.fetch = async (url) => (String(url).includes('/submit')
+        ? makeResponse({ 'x-api-status-code': '20000000', 'x-api-request-id': 'task-2' }, {})
+        : makeResponse({ 'x-api-status-code': '20000003', 'x-api-message': '[Normal silence audio]' }, { audio_info: { duration: 1000 }, result: { text: '' } }))
+      const silent = await transcribeVolcAuc(Buffer.alloc(100), { apiKey: 'k', pollMs: 1 })
+      check('火山整段转写：无有效语音返回空文本', silent.text === '' && silent.status === 'silence')
+
+      const missing = await transcribeVolcAuc(Buffer.alloc(100), {}).then(() => 'OK', (error) => error.code)
+      check('火山整段转写缺 apiKey 报错', missing === 'no_asr_key', missing)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  }
 } finally {
   await tmp.cleanup()
   await rm(tmp.dir, { recursive: true, force: true }).catch(() => {})
