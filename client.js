@@ -809,6 +809,10 @@ const WB_CALC = {
 .dsh-wb-md-ul{margin:0 0 8px;padding-left:18px}
 .dsh-wb-md-ul li{margin:2px 0}
 .dsh-wb-md-hr{border:0;border-top:1px solid var(--dsw-alias-border-l1);margin:10px 0}
+.dsh-wb-md-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:calc(var(--wb-fs) - 1px);line-height:1.6}
+.dsh-wb-md-table th,.dsh-wb-md-table td{border:1px solid var(--dsw-alias-border-l1);padding:4px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.dsh-wb-md-table th{background:var(--dsw-alias-bg-layer-2);font-weight:600;white-space:nowrap}
+.dsh-wb-md-table tr:nth-child(even) td{background:color-mix(in srgb, var(--dsw-alias-bg-layer-2) 45%, transparent)}
 .dsh-wb-code{padding:1px 4px;border-radius:4px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:calc(var(--wb-fs) - 2px)}
 .dsh-wb-wikilink{color:var(--dsw-alias-brand-primary);border-bottom:1px dashed currentColor}
 .dsh-wb-props{margin:0 0 10px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}
@@ -1082,6 +1086,7 @@ const WB_CALC = {
       const blocks = []
       let list = null
       let para = []
+      let table = null
       const flushPara = () => {
         if (para.length > 0) {
           blocks.push({ type: 'p', text: para.join(' ') })
@@ -1094,8 +1099,35 @@ const WB_CALC = {
           list = null
         }
       }
+      const flushTable = () => {
+        if (table !== null) {
+          // 只有「多列表头 + 至少一行数据」才算表格；否则按普通段落还原（避免单行竖线误判）
+          if (table.header.length >= 2 && table.rows.length > 0) {
+            delete table.raw
+            blocks.push(table)
+          } else {
+            blocks.push({ type: 'p', text: table.raw.join(' ') })
+          }
+          table = null
+        }
+      }
       for (const raw of String(text ?? '').split(/\r?\n/)) {
         const line = raw.replace(/\s+$/, '')
+        // 表格：以 | 开头的连续行，第二行是分隔行（|---|:--:|）
+        if (/^\s*\|/.test(line)) {
+          const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+          if (table === null) {
+            flushPara()
+            flushList()
+            table = { type: 'table', header: cells, rows: [], raw: [line.trim()] }
+            continue
+          }
+          if (table.rows.length === 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell))) continue
+          table.rows.push(cells)
+          table.raw.push(line.trim())
+          continue
+        }
+        flushTable()
         if (line.trim() === '') { flushPara(); flushList(); continue }
         const hash = line.match(/^(#{1,6})\s+(.+)$/)
         if (hash !== null) { flushPara(); flushList(); blocks.push({ type: 'h', level: hash[1].length, text: hash[2] }); continue }
@@ -1115,6 +1147,7 @@ const WB_CALC = {
       }
       flushPara()
       flushList()
+      flushTable()
       return blocks
     }
 
@@ -1204,6 +1237,18 @@ const WB_CALC = {
             return h('div', { key: index, className: 'dsh-wb-md-h dsh-wb-md-h' + Math.min(block.level, 4) }, inlineNodes(block.text, 'h' + index, basePath))
           }
           if (block.type === 'hr') return h('hr', { key: index, className: 'dsh-wb-md-hr' })
+          if (block.type === 'table') {
+            return h('table', { key: index, className: 'dsh-wb-md-table' },
+              h('thead', null, h('tr', null,
+                block.header.map((cell, cellIndex) => h('th', { key: cellIndex }, inlineNodes(cell, 'th' + index + '-' + cellIndex, basePath))),
+              )),
+              h('tbody', null,
+                block.rows.map((row, rowIndex) => h('tr', { key: rowIndex },
+                  block.header.map((_, cellIndex) => h('td', { key: cellIndex }, inlineNodes(row[cellIndex] ?? '', 'td' + index + '-' + rowIndex + '-' + cellIndex, basePath))),
+                )),
+              ),
+            )
+          }
           if (block.type === 'list') {
             return h('ul', { key: index, className: 'dsh-wb-md-ul' },
               block.items.map((item, itemIndex) => h('li', { key: itemIndex }, inlineNodes(item, 'li' + index + '-' + itemIndex, basePath))),
@@ -1217,6 +1262,7 @@ const WB_CALC = {
     return {
       inject: ['slots'],
       _calc: WB_CALC,
+      _md: markdownBlocks,
       apply(ctx) {
         const localeStore = {
           subscribe(listener) {

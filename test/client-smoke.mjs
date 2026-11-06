@@ -89,6 +89,18 @@ if (calc !== undefined) {
   check('跨维度换算返回 NaN', Number.isNaN(calc.convert(1, 'm3', 't')))
 }
 
+/* Markdown 解析：表格必须被识别成 table 块（之前会把整段当段落）。 */
+if (typeof plugin._md === 'function') {
+  const blocks = plugin._md('| 编号 | 项目 | 金额 |\n| --- | --- | --- |\n| BG-001 | 增加锚杆 | 120000 |\n| BG-002 | 调整标高 | 8000 |')
+  const table = blocks.find((block) => block.type === 'table')
+  check('表格被解析成 table 块', table !== undefined)
+  check('表格表头 3 列', table !== undefined && table.header.length === 3, table?.header?.length)
+  check('表格数据 2 行', table !== undefined && table.rows.length === 2, table?.rows?.length)
+  check('表格首行内容正确', table !== undefined && table.rows[0][0] === 'BG-001' && table.rows[0][2] === '120000', JSON.stringify(table?.rows?.[0]))
+  const noTable = plugin._md('| 不是表格 |')
+  check('单行竖线不误判成表格', !noTable.some((block) => block.type === 'table'), JSON.stringify(noTable))
+}
+
 const registered = []
 const ctx = {
   locale: {
