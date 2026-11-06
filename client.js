@@ -1889,8 +1889,6 @@ const WB_CALC = {
               return 'cost'
             }
           })
-          /** 用户在本会话里手动切过模式？切过就尊重手动选择，不再按工作区类型覆盖。 */
-          const [modeTouched, setModeTouched] = React.useState(false)
           React.useEffect(() => {
             try {
               window.localStorage.setItem('dsh-cost-workbench.mode', mode)
@@ -1944,13 +1942,12 @@ const WB_CALC = {
           }, [props.sessionId])
           const [registerHelp, setRegisterHelp] = React.useState(false)
           const [allowHtml, setAllowHtml] = React.useState(false)
-          // 工作区类型决定默认模式：造价项目 → 造价模式；普通/未标记 → 普通模式
-          // （必须在 projectInfo 声明之后，否则会触发 TDZ 错误导致整个面板崩溃）
+          // 显示模式跟随工作区类型：造价项目 → 造价模式；普通/未标记 → 普通模式
           React.useEffect(() => {
-            if (projectInfo === null || modeTouched) return
+            if (projectInfo === null) return
             const isProject = typeof projectInfo.project === 'string' && projectInfo.project !== ''
             setMode(isProject ? 'cost' : 'lite')
-          }, [projectInfo, modeTouched])
+          }, [projectInfo])
           React.useEffect(() => {
             let alive = true
             api('/config').then(
@@ -1972,7 +1969,6 @@ const WB_CALC = {
               (data) => {
                 if (!alive) return
                 setProjectInfo(data)
-                setModeTouched(false)
                 setReloadKey((value) => value + 1)
               },
               () => { if (alive) setProjectInfo(null) },
@@ -2135,14 +2131,6 @@ const WB_CALC = {
               }, '项目：' + (projectInfo !== null && typeof projectInfo.project === 'string' && projectInfo.project !== ''
                 ? projectInfo.project
                 : '公共库')),
-              projectInfo !== null && typeof projectInfo.workspace === 'string' && projectInfo.workspace !== '' && projectInfo.marked !== 'project'
-                ? h('button', {
-                    type: 'button',
-                    title: '把这个工作区标记为造价项目（自动建 造价工作台/ 与 会议记录/）',
-                    onClick: () => markProject(true),
-                    style: { background: 'none', border: 'none', padding: 0, color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline', whiteSpace: 'nowrap' },
-                  }, '设为造价项目')
-                : null,
             ),
             usage.deepseek !== null && usage.deepseek.configured === true
               ? h('button', {
@@ -2186,10 +2174,16 @@ const WB_CALC = {
             h('button', {
               type: 'button',
               className: 'dsh-wb-badge-btn',
-              title: t('mode.hint'),
-              onClick: () => { setModeTouched(true); setMode((value) => (value === 'cost' ? 'lite' : 'cost')) },
+              title: projectInfo !== null && projectInfo.marked === 'project'
+                ? '把当前工作区转为普通工作区（数据回退公共库，不删除文件）'
+                : '把当前工作区转为造价工作区（自动建 造价工作台/ 与 会议记录/）',
+              disabled: projectInfo === null || typeof projectInfo.workspace !== 'string' || projectInfo.workspace === '',
+              onClick: () => {
+                if (projectInfo === null) return
+                markProject(projectInfo.marked !== 'project')
+              },
             },
-              h('span', null, mode === 'cost' ? t('mode.cost') : t('mode.lite')),
+              h('span', null, projectInfo !== null && projectInfo.marked === 'project' ? '转为普通工作区' : '转为造价工作区'),
             ),
             h('button', {
               type: 'button',
