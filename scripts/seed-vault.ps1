@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     幂等创建「造价工作台」Obsidian 库与种子文件。
@@ -23,7 +23,7 @@
     脚本只使用内置 cmdlet，不联网。
 
 .PARAMETER VaultPath
-    Obsidian 库根目录，默认 E:\文档\Obsidian\造价工作台。
+    Obsidian 库根目录，默认 %USERPROFILE%\Obsidian\造价工作台；已有库请用 -VaultPath 指定。
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
@@ -33,7 +33,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$VaultPath = 'E:\文档\Obsidian\造价工作台'
+    [string]$VaultPath = (Join-Path $env:USERPROFILE 'Obsidian\造价工作台')
 )
 
 $ErrorActionPreference = 'Stop'

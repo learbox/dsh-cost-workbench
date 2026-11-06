@@ -21,18 +21,19 @@
 2. 打开 PowerShell（普通权限即可），执行：
 
    ```powershell
-   cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+   cd "C:\path\to\dsh-cost-workbench"
    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
    ```
 
    脚本会检查进程、解析插件源码目录、调用 DSH 自带的 CLI 完成安装，并在最后提示「重开 App 后生效」。
+   > 把命令里的 `C:\path\to\dsh-cost-workbench` 换成你实际放插件的目录（脚本会自己取上一级作为插件目录）。
 3. **重新启动 DeepSeek Harness**。
 4. 打开任意会话，点标题旁的造价工作台图标，或按 `Alt+W`（macOS 上是 `⌥W`）。
 
 ### 手动安装（等价）
 
 ```powershell
-& "C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+& "C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "C:\path\to\dsh-cost-workbench"
 ```
 
 如果你想用自定义 profile，把 `desktop` 换成你自己的 profile 名（`C:\Users\<你>\.dsh\profiles\` 下能看到）。
@@ -62,7 +63,7 @@ C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml
 - 或者直接把路径粘进输入框，例如：
 
 ```
-E:\文档\Obsidian\造价工作台
+D:\Obsidian\造价工作台
 ```
 
 保存即生效，之后不用再管。路径为空时保存会直接提示，不会无声失败。
@@ -75,9 +76,12 @@ E:\文档\Obsidian\造价工作台
 如果这个库还不存在，先运行种子脚本，它会幂等创建目录和起始内容（已存在的文件一律跳过，不覆盖你的改动）：
 
 ```powershell
-cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+cd "C:\path\to\dsh-cost-workbench"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 ```
+
+默认建在 `%USERPROFILE%\Obsidian\造价工作台`；想放到别处就加 `-VaultPath "D:\Obsidian\造价工作台"`
+（路径随你，工作台里点「选择…」指到同一个目录即可）。
 
 种子内容包含：`Workbench/` 下的术语表（30 条造价中英术语）、计价依据（5 条示例）、
 材料价格与变更签证台账（表头就绪、等待你填），以及 `00 资料库/` 四个子目录各一篇起始笔记。
@@ -135,7 +139,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 ## 数据都在哪
 
 ```
-E:\文档\Obsidian\造价工作台\          Obsidian 库（工作台的唯一事实源）
+D:\Obsidian\造价工作台\          Obsidian 库（工作台的唯一事实源）
   00 资料库\
     01 计价依据\
     02 招投标流程\
@@ -176,7 +180,7 @@ C:\Users\<你>\.dsh-workbench\asr.json        可选的语音转写凭据（不�
 - Markdown 支持是刻意精简的：不渲染 HTML、内嵌 PDF、mermaid。
 - 批注锚定到多行选择的**第一行**；高亮颜色固定为黄色。
 - 导入的音频转写时没有进度条。
-- **路径含中文与空格没问题**，但配置里请用绝对路径（如 `E:\文档\Obsidian\造价工作台`）。
+- **路径含中文与空格没问题**，但配置里请用绝对路径（如 `D:\Obsidian\造价工作台`）。
 - **面板打开了但一片空白**：点面板右上角的**刷新**按钮。这是首次加载的已知问题，刷新一次后正常。
 - 工作台直接读写 Obsidian 库：Obsidian 里的改动刷新后可见，这里的改动在 Obsidian 里立刻可见（同一份文件）。
 

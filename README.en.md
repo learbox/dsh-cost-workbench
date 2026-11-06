@@ -22,19 +22,22 @@ cost estimating on Windows. See [License](#license).
 2. In PowerShell (a normal, non-elevated shell is fine):
 
    ```powershell
-   cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+   cd "C:\path\to\dsh-cost-workbench"
    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
    ```
 
    The script checks the process, resolves the plugin folder, calls the bundled DSH CLI, and tells
    you to restart the app when it finishes.
+
+   > Replace `C:\path\to\dsh-cost-workbench` with the folder you actually put the plugin in
+   > (the script uses its own parent directory as the plugin folder).
 3. **Restart DeepSeek Harness.**
 4. Open any session and click the workbench icon next to the session title, or press `Alt+W`.
 
 ### Manual install (same thing)
 
 ```powershell
-& "C:\Users\<you>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+& "C:\Users\<you>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add "C:\path\to\dsh-cost-workbench"
 ```
 
 Using a custom profile? Replace `desktop` with your profile name (see `C:\Users\<you>\.dsh\profiles\`).
@@ -63,7 +66,7 @@ Either pick a folder with **“Choose…”** (system folder picker; a missing f
 the path directly:
 
 ```
-E:\文档\Obsidian\造价工作台
+D:\Obsidian\造价工作台
 ```
 
 Saving takes effect immediately, with no restart. An empty path is reported instead of failing silently.
@@ -73,9 +76,13 @@ If that vault does not exist yet, run the seed script first (it is idempotent �
 skipped, never overwritten):
 
 ```powershell
-cd "E:\文档\deepseek-harness\DSH私人工作台\dsh-cost-workbench"
+cd "C:\path\to\dsh-cost-workbench"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 ```
+
+The default target is `%USERPROFILE%\Obsidian\造价工作台`; pass
+`-VaultPath "D:\Obsidian\造价工作台"` to create it somewhere else (then point the workbench
+at that same folder with “Choose…”).
 
 It creates the `Workbench/` tables (a glossary with 30 cost terms, five sample pricing-basis rows,
 empty material-price and variation ledgers) and four starter notes under `00 资料库/`.
@@ -136,7 +143,7 @@ It writes to the composer and never sends. If there is already a draft, it asks 
 ## Where things live
 
 ```
-E:\文档\Obsidian\造价工作台\          the Obsidian vault (single source of truth)
+D:\Obsidian\造价工作台\          the Obsidian vault (single source of truth)
   00 资料库\
     01 计价依据\
     02 招投标流程\

@@ -97,7 +97,7 @@ function Show-ManualFallback([string]$reason, [string]$cliPath) {
     Write-Host '           - id: dsh-cost-workbench'
     Write-Host "             name: 'dsh-cost-workbench'"
     Write-Host '             config:'
-    Write-Host '               vaultRoot: "E:\文档\Obsidian\造价工作台"'
+    Write-Host '               vaultRoot: "D:\Obsidian\造价工作台"'
     Write-Host '               sopDir: "00 资料库"'
     Write-Host '               workbenchDir: "Workbench"'
     Write-Host '               recordingsDir: "会议记录"'
@@ -242,7 +242,7 @@ try {
     Write-Host '         不重启 App 的话，工作台不会挂上去。'
     Write-Host '      2. 打开任意会话，点标题右侧的造价工作台图标，或按 Alt+W。'
     Write-Host '      3. 第一次打开会问 Obsidian 库路径，填：'
-    Write-Host '         E:\文档\Obsidian\造价工作台'
+    Write-Host '         D:\Obsidian\造价工作台'
     Write-Host '      4. 如果这个库还没建，先运行同目录的 seed-vault.ps1 生成种子内容。'
     Write-Host ''
     Write-Info '工作台数据留在 Obsidian 库与 C:\Users\<你>\.dsh-workbench 下，卸载不会删除。'
