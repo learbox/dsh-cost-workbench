@@ -4795,7 +4795,7 @@ function CalcCard({ t }) {
 
           /* ------------------------------------------------ 语音凭据（可选） */
           const [creds, setCreds] = React.useState(null)
-          const [credDraft, setCredDraft] = React.useState({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '', deepseekKey: '' })
+          const [credDraft, setCredDraft] = React.useState({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '' })
           const [credBusy, setCredBusy] = React.useState(false)
           const [credFlash, setCredFlash] = React.useState(null)
 
@@ -4815,12 +4815,11 @@ function CalcCard({ t }) {
           }, [credFlash])
 
           const saveCreds = () => {
-            const body = { volcengine: {}, deepseek: {} }
+            const body = { volcengine: {} }
             if (credDraft.volcApiKey.trim() !== '') body.volcengine.apiKey = credDraft.volcApiKey.trim()
             if (credDraft.volcAccessKey.trim() !== '') body.volcengine.accessKey = credDraft.volcAccessKey.trim()
             if (credDraft.volcSecretKey.trim() !== '') body.volcengine.secretKey = credDraft.volcSecretKey.trim()
-            if (credDraft.deepseekKey.trim() !== '') body.deepseek.apiKey = credDraft.deepseekKey.trim()
-            if (Object.keys(body.volcengine).length === 0 && Object.keys(body.deepseek).length === 0) {
+            if (Object.keys(body.volcengine).length === 0) {
               setCredFlash('没有新填写的内容；已配置的密钥不会回显，留空表示不修改')
               return
             }
@@ -4829,8 +4828,8 @@ function CalcCard({ t }) {
             api('/credentials', { method: 'PUT', body }).then(
               (data) => {
                 setCreds(data)
-                setCredDraft({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '', deepseekKey: '' })
-                setCredFlash('凭据已保存；余额角标点刷新、录音转写下次开始即生效')
+                setCredDraft({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '' })
+                setCredFlash('凭据已保存；录音转写下次开始即生效')
               },
               (error) => setCredFlash('保存失败：' + error.message),
             ).finally(() => setCredBusy(false))
@@ -4919,7 +4918,6 @@ function CalcCard({ t }) {
                 credField('火山流式语音 API Key（会议记录转写）', 'volcApiKey', 'volcengine.apiKey', creds.volcengine?.apiKey === true),
                 credField('火山 AccessKey（查语音资源包余额）', 'volcAccessKey', 'volcengine.accessKey', creds.volcengine?.accessKey === true),
                 credField('火山 SecretKey', 'volcSecretKey', 'volcengine.secretKey', creds.volcengine?.secretKey === true),
-                credField('DeepSeek API Key（顶部余额角标）', 'deepseekKey', 'deepseek.apiKey', creds.deepseek?.apiKey === true),
               ]
 
           if (status.state === 'loading') return h('div', { className: 'dsh-wb-loading' }, t('panel.loading'))
@@ -4927,7 +4925,7 @@ function CalcCard({ t }) {
             return h('div', { className: 'dsh-wb-error' }, t('panel.error') + '：' + status.message)
           }
 
-          return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': '14px', padding: '2px 2px 18px' } },
+          return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': '14px', padding: '2px 2px 18px', height: '100%', overflowY: 'auto', boxSizing: 'border-box' } },
             h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
               h('h2', { style: { margin: 0, fontSize: '17px' } }, '造价工作台'),
               h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, '会话右侧栏的资料库与造价工具'),
@@ -4979,7 +4977,7 @@ function CalcCard({ t }) {
                   '不填完全不影响资料库、三张表、计算器等其它功能'),
               ),
               h('p', { className: 'dsh-wb-note', style: { marginTop: '6px' } },
-                '填了才会出现顶部的 DeepSeek 余额 / 语音资源包角标，会议记录卡也才能实时转写。凭据只写在 ~/.dsh-workbench/asr.json，不会回显、不上传。'),
+                '填了才会出现语音资源包角标，会议记录卡也才能实时转写。DeepSeek 余额走账号登录态、不需要这里配置。凭据只写在 ~/.dsh-workbench/asr.json，不会回显、不上传。'),
               ...credFields,
               credFlash !== null ? h('div', { className: 'dsh-wb-error', style: { marginTop: '10px' } }, credFlash) : null,
               h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '12px' } },
