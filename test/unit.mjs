@@ -1,5 +1,5 @@
 /**
- * 纯逻辑单测：cards / prompts / glossary / email / vault。
+ * 纯逻辑单测：cards / prompts / glossary / 造价三表 / vault。
  * 全部用临时目录，不碰真实数据。
  */
 import assert from 'node:assert/strict'
@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { readCards, BUILTIN_CARDS } from '../lib/cards.js'
 import { readPrompts } from '../lib/prompts.js'
 import * as G from '../lib/glossary.js'
-import { readEmailStats } from '../lib/email.js'
+import { createCostTables, entryMatches } from '../lib/tables.js'
 import { createVaultStore, previewOf, sectionsOf } from '../lib/vault.js'
 import { createReporter, tempDir } from './helpers.mjs'
 
@@ -45,11 +45,11 @@ try {
 
   /* -------------------------------------------------------------- glossary */
   const glossaryFile = join(tmp.dir, '术语表.md')
-  const added = await G.addGlossaryEntry(glossaryFile, { zh: '差额补足', en: 'Shortfall Undertaking', field: '增信', note: '' })
+  const added = await G.addGlossaryEntry(glossaryFile, { zh: '工程量清单', en: 'Bill of Quantities', field: '造价', note: '' })
   check('glossary 新增', added.ok === true && added.entry.id.length === 12)
   check('glossary 首次写入不产生 .bak', await readFile(glossaryFile + '.bak', 'utf8').then(() => false, () => true))
 
-  const duplicated = await G.addGlossaryEntry(glossaryFile, { zh: '差额补足', en: 'Shortfall Undertaking' })
+  const duplicated = await G.addGlossaryEntry(glossaryFile, { zh: '工程量清单', en: 'Bill of Quantities' })
   check('glossary 重复被拒', duplicated.ok === false && duplicated.code === 'duplicate')
 
   const before = await readFile(glossaryFile, 'utf8')
@@ -58,10 +58,10 @@ try {
   check('glossary 空条目被拒', (await G.addGlossaryEntry(glossaryFile, { zh: '', en: '' })).ok === false)
   check('glossary 超长被拒', (await G.addGlossaryEntry(glossaryFile, { zh: 'x'.repeat(201), en: '' })).ok === false)
 
-  const second = await G.addGlossaryEntry(glossaryFile, { zh: '提款期', en: 'Availability Period', field: '融资' })
-  const updated = await G.updateGlossaryEntry(glossaryFile, added.entry.id, { zh: '差额补足', en: 'Shortfall Undertaking Agreement', field: '增信', note: '改过' })
+  const second = await G.addGlossaryEntry(glossaryFile, { zh: '综合单价', en: 'Comprehensive Unit Price', field: '造价' })
+  const updated = await G.updateGlossaryEntry(glossaryFile, added.entry.id, { zh: '工程量清单', en: 'Bill of Quantities (BOQ)', field: '造价', note: '改过' })
   check('glossary 改 key 生成新 id', updated.ok === true && updated.entry.id !== added.entry.id)
-  check('glossary 改后 .bak 留住旧版', (await readFile(glossaryFile + '.bak', 'utf8')).includes('Shortfall Undertaking'))
+  check('glossary 改后 .bak 留住旧版', (await readFile(glossaryFile + '.bak', 'utf8')).includes('Bill of Quantities'))
   check('glossary 删除', (await G.deleteGlossaryEntry(glossaryFile, second.entry.id)).ok === true)
   check('glossary 解析回两条→一条', G.parseGlossary(await readFile(glossaryFile, 'utf8')).length === 1)
   const multi = await G.addGlossaryEntry(glossaryFile, { zh: '测试句式', en: 'test pattern', tag: '句式，待核，句式' })
@@ -69,25 +69,33 @@ try {
   check('标签清空', (await G.updateGlossaryEntry(glossaryFile, multi.entry.id, { zh: '测试句式', en: 'test pattern', tag: '' })).entry.tag === '')
 
 
-  /* ----------------------------------------------------------------- email */
-  const emailDir = join(tmp.dir, 'email')
-  await mkdir(join(emailDir, 'references'), { recursive: true })
-  await writeFile(join(emailDir, 'references', 'style-rules.md'), [
-    '| 硬规则数 | 2 |',
-    '| 软规则数 | 3 |',
-    '| 待观察（已批准） | 1 |',
-    '| 最后整合 | 2026-10-20 |',
-    '## 硬规则（≥3 次）',
-    '### R-001 · a',
-    '### R-002 · b',
-    '## 软规则',
-    '### R-003 · c',
-    '## 待观察',
-    '### R-004 · d',
-  ].join('\n'), 'utf8')
-  const stats = await readEmailStats(emailDir)
-  check('email 读计数表', stats.ok === true && stats.hard === 2 && stats.soft === 3 && stats.watch === 1 && stats.lastMerge === '2026-10-20')
-  check('email 缺文件报 missing_rules', (await readEmailStats(join(tmp.dir, 'none'))).code === 'missing_rules')
+  /* ---------------------------------------------------------------- 三张表 */
+  const workbenchDir = join(tmp.dir, 'Workbench')
+  await mkdir(workbenchDir, { recursive: true })
+  const tables = createCostTables({ workbenchDir })
+  check('三张表路径落在 Workbench', tables.standards.file.endsWith(join('Workbench', '计价依据.md')), tables.standards.file)
+  check('三张表列数一致', tables.standards.header.length === tables.standards.keys.length && tables.prices.header.length === 7 && tables.changes.header.length === 6)
+
+  const std = await tables.standards.api.add(tables.standards.file, { code: 'GB50500', name: '建设工程工程量清单计价规范', category: '计价规范', version: 'GB 50500-2013', date: '2013-07-01', note: '' })
+  check('计价依据新增', std.ok === true && std.entry.id.length === 12)
+  const dupStd = await tables.standards.api.add(tables.standards.file, { code: 'GB50500', name: '另一个名字' })
+  check('计价依据主键重复被拒', dupStd.ok === false && dupStd.code === 'duplicate')
+
+  const price = await tables.prices.api.add(tables.prices.file, { name: '螺纹钢', spec: 'HRB400E φ20', unit: 't', price: '3950', region: '杭州', date: '2026-10-01', source: '信息价' })
+  check('材料价格新增', price.ok === true)
+  const price2 = await tables.prices.api.add(tables.prices.file, { name: '螺纹钢', spec: 'HRB400E φ20', unit: 't', region: '上海' })
+  check('材料价格同规格不同地区可并存', price2.ok === true)
+  const dupPrice = await tables.prices.api.add(tables.prices.file, { name: '螺纹钢', spec: 'HRB400E φ20', unit: 't', region: '杭州' })
+  check('材料价格同主键被拒', dupPrice.ok === false && dupPrice.code === 'duplicate')
+
+  const change = await tables.changes.api.add(tables.changes.file, { code: 'BG-001', project: '示例项目', reason: '增加抗浮锚杆', amount: '120000', date: '2026-10-20', status: '待审批' })
+  check('变更签证新增', change.ok === true)
+  const updatedChange = await tables.changes.api.update(tables.changes.file, change.entry.id, { code: 'BG-001', project: '示例项目', reason: '增加抗浮锚杆', amount: '135000', date: '2026-10-20', status: '已批准' })
+  check('变更签证修改并落盘', updatedChange.ok === true && (await readFile(tables.changes.file, 'utf8')).includes('135000'))
+  check('变更签证删除', (await tables.changes.api.remove(tables.changes.file, updatedChange.entry.id)).ok === true)
+
+  check('搜索命中三表字段', entryMatches({ name: '螺纹钢', spec: 'HRB400E' }, tables.prices.keys, 'hrb400e'))
+  check('搜索不误命中', !entryMatches({ name: '螺纹钢' }, tables.prices.keys, '混凝土'))
 
   /* ----------------------------------------------------------------- vault */
   const vaultRoot = join(tmp.dir, 'vault')

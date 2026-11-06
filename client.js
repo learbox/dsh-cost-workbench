@@ -1,19 +1,22 @@
 /**
- * dsh-workbench · Client 半边（浏览器）
+ * dsh-cost-workbench · Client 半边（浏览器）
  *
  * 三件事：
- *  ① 会话头部加一个「工作台」图标按钮；
+ *  ① 会话头部加一个「造价工作台」图标按钮；
  *  ② 打开工作台：**只用浮层**，不注册右侧栏标签类型、不碰 layout 的右栏状态
  *     （曾尝试注册侧栏标签，一旦该类型在某个会话里出错，会把整条右栏连预览一起带走）；
- *  ③ 正文按 cards.json 渲染卡片：SOP 速查 / 法宝积分 / 邮件起草 / 术语表 / 报销入口，
- *     每张卡自己取数、自己报错——一张坏掉不影响其它卡。
+ *  ③ 正文按 cards.json 渲染卡片：资料库 / 计价依据 / 材料价格 / 变更签证 / 造价计算器 /
+ *     术语表 / 会议记录 / 提示词模板；每张卡自己取数、自己报错——一张坏掉不影响其它卡。
  *
- * SOP 卡的数据源是 Obsidian vault 里的 md 笔记本身：列表、读、改、新建都走同一个文件。
+ * 双模式：工具栏右侧「造价 / 普通」切换；普通模式卡片全部隐藏、只留搜索，
+ * 状态存 localStorage（dsh-cost-workbench.mode），不写 vault、不写配置。
+ *
+ * 资料库卡的数据源是 Obsidian vault 里的 md 笔记本身：列表、读、改、新建都走同一个文件。
  * 拖宽、全屏、关闭由宿主右侧栏壳层提供。插入 prompt 只写输入框、不发送；输入框已有草稿
  * 时先弹确认条（追加 / 覆盖 / 取消），读不出草稿时也先确认，绝不盲写。
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-legal-workbench',
+  id: 'dsh-cost-workbench',
   factory(require) {
     const React = require('react')
     const h = React.createElement
@@ -24,23 +27,289 @@ window.__ModuleLoader__.load({
     const TAB_ADDRESS = ADDRESS_PREFIX + 'panel'
     const API = '/api/dsh-workbench'
 
+/* ---------------------------------------------------------------- 一、三表 UI 元数据 */
+
+/**
+ * 三张表的前端元数据。
+ *   api      路由基路径（拼在 API = '/api/dsh-workbench' 之后）
+ *   titleKey 卡片标题的 i18n 键（cards.json 给了 title 时优先用 card.title）
+ *   subKey   卡片说明的 i18n 键（渲染到 CardShell 的 note）
+ *   emptyKey 空表提示的 i18n 键（三张表共用 table.empty）
+ *   chipKey  行标题右侧显示成 dsh-wb-chip 的字段（可省略）
+ *   idKeys   主键字段：新增/保存前做一次客户端校验，全空时提示 table.needKey
+ *   fields   列顺序 = 表单顺序 = Markdown 行内插入顺序；key 与 Host 字段名一一对应
+ *
+ * 文案键全部沿用 client.js 现有字典（standards.field.* / table.* 等）；
+ * WB_TABLES 的位置顺序就是界面里的列顺序，必须与 lib/tables.js 的 header / keys 对齐。
+ */
+const WB_TABLES = {
+  standards: {
+    api: '/standards',
+    titleKey: 'standards.title',
+    subKey: 'standards.sub',
+    emptyKey: 'table.empty',
+    chipKey: 'category',
+    idKeys: ['code'],
+    fields: [
+      { key: 'code', labelKey: 'standards.field.code' },
+      { key: 'name', labelKey: 'standards.field.name' },
+      { key: 'category', labelKey: 'standards.field.category' },
+      { key: 'version', labelKey: 'standards.field.version' },
+      { key: 'date', labelKey: 'standards.field.date' },
+      { key: 'note', labelKey: 'standards.field.note' },
+    ],
+  },
+  prices: {
+    api: '/prices',
+    titleKey: 'prices.title',
+    subKey: 'prices.sub',
+    emptyKey: 'table.empty',
+    chipKey: 'unit',
+    idKeys: ['name', 'spec', 'unit', 'region'],
+    fields: [
+      { key: 'name', labelKey: 'prices.field.name' },
+      { key: 'spec', labelKey: 'prices.field.spec' },
+      { key: 'unit', labelKey: 'prices.field.unit' },
+      { key: 'price', labelKey: 'prices.field.price' },
+      { key: 'region', labelKey: 'prices.field.region' },
+      { key: 'date', labelKey: 'prices.field.date' },
+      { key: 'source', labelKey: 'prices.field.source' },
+    ],
+  },
+  changes: {
+    api: '/changes',
+    titleKey: 'changes.title',
+    subKey: 'changes.sub',
+    emptyKey: 'table.empty',
+    chipKey: 'status',
+    idKeys: ['code'],
+    fields: [
+      { key: 'code', labelKey: 'changes.field.code' },
+      { key: 'project', labelKey: 'changes.field.project' },
+      { key: 'reason', labelKey: 'changes.field.reason' },
+      { key: 'amount', labelKey: 'changes.field.amount' },
+      { key: 'date', labelKey: 'changes.field.date' },
+      { key: 'status', labelKey: 'changes.field.status' },
+    ],
+  },
+}
+
+/* ------------------------------------------------------------ 二、造价计算纯函数 */
+
+/**
+ * 严格的数字解析：空串、null、undefined、'abc'、'1,000' 都返回 NaN。
+ * 纯函数内部统一用它，保证「非法输入绝不抛异常，只返回 NaN」。
+ */
+function wbNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN
+  const text = String(value ?? '').trim()
+  if (text === '') return NaN
+  const parsed = Number(text)
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+/** 结果展示统一保留两位小数；NaN 返回空串（由调用方显示「请输入数字」）。 */
+function wbFixed(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : ''
+}
+
+/**
+ * 对本次新增的少数 i18n 键做中文兜底。
+ * t() 缺键时会回退成键名本身（makeT 规则：EN → ZH → key），这里换成默认中文，
+ * 这样即使 Lead 漏加 `table.saved` 这类键，界面也不会直接露出键名。
+ */
+function wbText(t, key, fallback) {
+  const text = t(key)
+  return text === key ? fallback : text
+}
+
+/** a / b；任一非法或 b 为 0 时返回 NaN。 */
+function wbRatio(top, bottom) {
+  const a = wbNumber(top)
+  const b = wbNumber(bottom)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN
+  return a / b
+}
+
+/** 从一个对象里按候选键名取第一个非空值（给 totalCost 的别名兼容用）。 */
+function wbPick(source, keys, fallback) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      const value = source[key]
+      if (value !== undefined && value !== null && String(value).trim() !== '') return value
+    }
+  }
+  return fallback
+}
+
+/** 单位换算因子表：只有 dim 相同的单位之间才能换算。 */
+const WB_UNIT_FACTORS = {
+  m3: { dim: 'volume', factor: 1000 },
+  l: { dim: 'volume', factor: 1 },
+  t: { dim: 'mass', factor: 1000 },
+  kg: { dim: 'mass', factor: 1 },
+  mpa: { dim: 'stress', factor: 1 },
+  'n/mm2': { dim: 'stress', factor: 1 },
+  wanyuan: { dim: 'money', factor: 10000 },
+  yuan: { dim: 'money', factor: 1 },
+  m2: { dim: 'area', factor: 1 },
+  mu: { dim: 'area', factor: 2000 / 3 },
+}
+
+/** 界面与测试里可能出现的各种单位写法 → 因子表的键。 */
+const WB_UNIT_ALIASES = {
+  m3: 'm3',
+  'm³': 'm3',
+  立方米: 'm3',
+  l: 'l',
+  L: 'l',
+  升: 'l',
+  t: 't',
+  吨: 't',
+  kg: 'kg',
+  千克: 'kg',
+  mpa: 'mpa',
+  MPa: 'mpa',
+  'n/mm2': 'n/mm2',
+  'n/mm²': 'n/mm2',
+  'N/mm2': 'n/mm2',
+  'N/mm²': 'n/mm2',
+  wanyuan: 'wanyuan',
+  万元: 'wanyuan',
+  yuan: 'yuan',
+  元: 'yuan',
+  m2: 'm2',
+  'm²': 'm2',
+  平方米: 'm2',
+  mu: 'mu',
+  亩: 'mu',
+}
+
+/** 单位名 → { dim, factor }；不认识返回 null。 */
+function wbUnitOf(name) {
+  const text = String(name ?? '').trim()
+  if (text === '') return null
+  const code = WB_UNIT_ALIASES[text] ?? WB_UNIT_ALIASES[text.toLowerCase()]
+  if (code === undefined) return null
+  const unit = WB_UNIT_FACTORS[code]
+  return unit !== undefined ? { dim: unit.dim, factor: unit.factor } : null
+}
+
+/** 换算下拉框的选项。单位符号（m³/L/t/…）本身跨语言，直接写死，不占用 i18n 键。 */
+const WB_CALC_UNITS = [
+  { code: 'm3', label: 'm³' },
+  { code: 'l', label: 'L' },
+  { code: 't', label: 't' },
+  { code: 'kg', label: 'kg' },
+  { code: 'mpa', label: 'MPa' },
+  { code: 'n/mm2', label: 'N/mm²' },
+  { code: 'wanyuan', label: '万元' },
+  { code: 'yuan', label: '元' },
+  { code: 'm2', label: 'm²' },
+  { code: 'mu', label: '亩' },
+]
+
+/**
+ * 造价计算纯函数集合。UI 与测试共用同一批实现，CalcCard 只做取值与展示，禁止重复实现公式。
+ *
+ * 约定：
+ *   - 入参可以是数字，也可以是数字字符串（来自 input 的原始值），内部用 wbNumber 严格解析；
+ *   - 任何非法输入返回 NaN，**不抛异常**；
+ *   - 返回未四舍五入的原始数值，展示层用 wbFixed(...) 保留两位小数，方便用户核对中间过程；
+ *   - 费率类字段（overheadRate / profitRate / taxRate）都用百分数，例如 9 表示 9%。
+ *
+ * 字段名（与 README / Lead 的测试约定一致）：
+ *   unitPrice({ labor, material, machine, overheadRate, profitRate, fee, taxRate })
+ *   totalCost({ direct, measures, other, fee, taxRate })
+ *     direct = 分部分项工程费，measures = 措施项目费，other = 其他项目费，fee = 规费
+ *     兼容别名：direct ← part / works / 分部分项；measures ← measure / 措施项目 / 措施；
+ *               other ← others / 其他项目 / 其他
+ */
+const WB_CALC = {
+  /** 钢筋理论重量：w = d² × 0.00617（kg/m），d 为直径 mm。 */
+  rebarWeight(diameter) {
+    const d = wbNumber(diameter)
+    if (!Number.isFinite(d) || d <= 0) return NaN
+    return d * d * 0.00617
+  },
+
+  /** 综合单价 = (人工+材料+机械) × (1+管理费率/100) × (1+利润率/100) + 规费，再 × (1+税率/100)。 */
+  unitPrice(input) {
+    const source = input !== null && typeof input === 'object' ? input : {}
+    const labor = wbNumber(source.labor)
+    const material = wbNumber(source.material)
+    const machine = wbNumber(source.machine)
+    const overheadRate = wbNumber(source.overheadRate)
+    const profitRate = wbNumber(source.profitRate)
+    const fee = source.fee === undefined ? 0 : wbNumber(source.fee)
+    const taxRate = source.taxRate === undefined ? 9 : wbNumber(source.taxRate)
+    const values = [labor, material, machine, overheadRate, profitRate, fee, taxRate]
+    if (!values.every((value) => Number.isFinite(value))) return NaN
+    const base = labor + material + machine
+    const withFee = base * (1 + overheadRate / 100) * (1 + profitRate / 100) + fee
+    return withFee * (1 + taxRate / 100)
+  },
+
+  /** 总造价 = (分部分项+措施+其他+规费) × (1+税率/100)，税率默认 9。 */
+  totalCost(input) {
+    const source = input !== null && typeof input === 'object' ? input : {}
+    const direct = wbNumber(wbPick(source, ['direct', 'part', 'works', '分部分项'], undefined))
+    const measures = wbNumber(wbPick(source, ['measures', 'measure', '措施项目', '措施'], undefined))
+    const other = wbNumber(wbPick(source, ['other', 'others', '其他项目', '其他'], undefined))
+    const fee = source.fee === undefined ? 0 : wbNumber(source.fee)
+    const taxRate = source.taxRate === undefined ? 9 : wbNumber(source.taxRate)
+    const values = [direct, measures, other, fee, taxRate]
+    if (!values.every((value) => Number.isFinite(value))) return NaN
+    return (direct + measures + other + fee) * (1 + taxRate / 100)
+  },
+
+  /** 单位造价 = 总价 / 建筑面积（元/m²）。 */
+  costPerArea(total, area) {
+    return wbRatio(total, area)
+  },
+
+  /**
+   * 含钢量 = 钢筋总量 / 建筑面积。
+   * 入参单位由调用方决定：CalcCard 里钢筋总量填 kg、面积填 m²，得到 kg/m²。
+   */
+  steelPerArea(steel, area) {
+    return wbRatio(steel, area)
+  },
+
+  /** 单位换算：m³↔L、t↔kg、MPa↔N/mm²、万元↔元、m²↔亩；跨维度返回 NaN。 */
+  convert(value, from, to) {
+    const amount = wbNumber(value)
+    const source = wbUnitOf(from)
+    const target = wbUnitOf(to)
+    if (!Number.isFinite(amount) || source === null || target === null || source.dim !== target.dim) return NaN
+    return (amount * source.factor) / target.factor
+  },
+}
+
     const ZH = {
-      'tab.title': '工作台',
-      'header.open': '工作台',
+      'tab.title': '造价工作台',
+      'header.open': '造价工作台',
+      'mode.cost': '造价',
+      'mode.lite': '普通',
+      'mode.hint': '普通模式：卡片全部隐藏，只保留搜索',
       'panel.refresh': '刷新',
       'panel.loading': '读取中…',
       'panel.retry': '重试',
       'panel.error': '读取失败',
       'panel.unsupported': '暂不支持这个卡片类型',
-      'panel.search': '搜索笔记 / 术语 / 邮件规则…',
+      'panel.search': '搜索资料 / 术语 / 清单 / 录音…',
       'panel.searchEmpty': '没有搜到',
       'panel.searchHit': '条命中',
-      'panel.openNote': '去 SOP',
+      'panel.openNote': '去资料库',
       'panel.openCard': '去卡片',
-      'src.sop': 'SOP',
+      'panel.liteNotice': '当前是普通模式：卡片已隐藏，只保留搜索。点右上角「造价」回到造价模式。',
+      'src.sop': '资料库',
+      'src.standards': '计价依据',
+      'src.prices': '材料价格',
+      'src.changes': '变更签证',
       'src.glossary': '术语',
-      'src.email': '邮件',
       'src.recording': '录音',
+      'src.calc': '计算器',
       'insert.pending.title': '输入框已有草稿',
       'insert.append': '追加',
       'insert.overwrite': '覆盖',
@@ -72,7 +341,7 @@ window.__ModuleLoader__.load({
       'sop.folder': '目录',
       'sop.filename': '文件名',
       'sop.creating': '新建笔记',
-      'sop.newTitle': '小节名，如 尽调清单',
+      'sop.newTitle': '笔记名，如 招标流程',
       'sop.editing': '编辑笔记',
       'sop.body': '正文（Markdown）',
       'sop.pickNote': '从左边选一篇笔记',
@@ -80,26 +349,6 @@ window.__ModuleLoader__.load({
       'sop.nav': '目录',
       'sop.showNav': '显示目录',
       'sop.hideNav': '隐藏目录',
-      'pkulaw.available': '可用积分',
-      'pkulaw.expiring': '即将过期',
-      'pkulaw.nearest': '最近过期日',
-      'pkulaw.claimed': '今日已领（推断）',
-      'pkulaw.notClaimed': '今日未领（推断）',
-      'pkulaw.claim': '去领取',
-      'pkulaw.refresh': '刷新余额',
-      'pkulaw.stale': '用的是旧值',
-      'pkulaw.idle': '点刷新读取余额（0 积分/次）',
-      'pkulaw.expand': '展开',
-      'pkulaw.collapse': '收起',
-      'pkulaw.low': '余额不足',
-      'pkulaw.lowHint': '可用积分不足 100，去 console 领一下当日积分再用法宝检索。',
-      'email.hard': '硬规则',
-      'email.soft': '软规则',
-      'email.watch': '待观察',
-      'email.absorbed': '已吸收终稿',
-      'email.lastMerge': '最后整合',
-      'email.draft': '新起草',
-      'email.rules': '查看规则库',
       'glossary.search': '搜索中文 / 英文 / 领域',
       'glossary.add': '新增',
       'glossary.edit': '编辑',
@@ -114,11 +363,81 @@ window.__ModuleLoader__.load({
       'glossary.en': '英文',
       'glossary.field': '领域',
       'glossary.tag': '标签',
-      'glossary.tagHint': '多个标签用逗号分隔，如：句式, 待核',
+      'glossary.tagHint': '多个标签用逗号分隔，如：清单, 待核',
       'glossary.note': '备注',
-      'reimburse.template': '模板',
-      'reimburse.missing': '模板还没配',
-      'reimburse.insert': '插入填表 prompt',
+      'glossary.heading': '造价术语表',
+      'table.search': '搜索…',
+      'table.add': '新增',
+      'table.edit': '编辑',
+      'table.del': '删除',
+      'table.save': '保存',
+      'table.cancel': '取消',
+      'table.copy': '复制',
+      'table.insert': '插入',
+      'table.empty': '还没有记录，点「新增」开始',
+      'table.total': '条记录',
+      'table.creating': '新增记录',
+      'table.editing': '编辑记录',
+      'table.confirmDelete': '确定删除这条记录？',
+      'table.needKey': '请至少填写主键字段',
+      'table.added': '已新增',
+      'table.saved': '已保存',
+      'table.deleted': '已删除',
+      'table.failed': '操作失败：',
+      'standards.title': '计价依据',
+      'standards.sub': '清单规范、消耗量定额、面积规则、合同示范文本',
+      'standards.field.code': '编号',
+      'standards.field.name': '名称',
+      'standards.field.category': '类别',
+      'standards.field.version': '版本文号',
+      'standards.field.date': '实施日期',
+      'standards.field.note': '备注',
+      'prices.title': '材料价格',
+      'prices.sub': '询价与信息价，供组价与签证取证',
+      'prices.field.name': '材料',
+      'prices.field.spec': '规格',
+      'prices.field.unit': '单位',
+      'prices.field.price': '单价',
+      'prices.field.region': '地区',
+      'prices.field.date': '日期',
+      'prices.field.source': '来源',
+      'changes.title': '变更签证',
+      'changes.sub': '变更、签证、索赔流水账',
+      'changes.field.code': '编号',
+      'changes.field.project': '项目',
+      'changes.field.reason': '事由',
+      'changes.field.amount': '金额',
+      'changes.field.date': '日期',
+      'changes.field.status': '状态',
+      'calc.title': '造价计算器',
+      'calc.sub': '综合单价、总造价、钢筋、单位指标、换算',
+      'calc.unitPrice': '综合单价组价',
+      'calc.totalCost': '总造价',
+      'calc.rebar': '钢筋理论重量',
+      'calc.indicators': '单位指标',
+      'calc.convert': '单位换算',
+      'calc.labor': '人工费',
+      'calc.material': '材料费',
+      'calc.machine': '机械费',
+      'calc.overhead': '管理费率%',
+      'calc.profit': '利润率%',
+      'calc.fee': '规费',
+      'calc.tax': '税率%',
+      'calc.subtotal': '分部分项',
+      'calc.measures': '措施费',
+      'calc.others': '其他项目',
+      'calc.area': '建筑面积',
+      'calc.steel': '钢筋总量',
+      'calc.costPerArea': '单位造价',
+      'calc.steelPerArea': '含钢量',
+      'calc.diameter': '直径(mm)',
+      'calc.rebarHint': '多个直径用逗号分隔，如 16,20,25',
+      'calc.value': '数值',
+      'calc.from': '从',
+      'calc.to': '到',
+      'calc.result': '结果',
+      'calc.calculate': '计算',
+      'calc.invalid': '请输入数字',
       'state.ok': '存在',
       'state.missing': '缺失',
       'state.denied': '无权限',
@@ -130,22 +449,29 @@ window.__ModuleLoader__.load({
       'state.unsupported': '不支持',
     }
     const EN = {
-      'tab.title': 'Workbench',
-      'header.open': 'Workbench',
+      'tab.title': 'Cost Workbench',
+      'header.open': 'Cost Workbench',
+      'mode.cost': 'Cost',
+      'mode.lite': 'Lite',
+      'mode.hint': 'Lite mode: all cards hidden, search only',
       'panel.refresh': 'Refresh',
       'panel.loading': 'Loading…',
       'panel.retry': 'Retry',
       'panel.error': 'Could not load',
       'panel.unsupported': 'This card kind is not supported yet',
-      'panel.search': 'Search notes / glossary / email rules…',
+      'panel.search': 'Search library / terms / BOQ / recordings…',
       'panel.searchEmpty': 'No match',
       'panel.searchHit': 'hits',
-      'panel.openNote': 'Open in SOP',
+      'panel.openNote': 'Open in library',
       'panel.openCard': 'Open card',
-      'src.sop': 'SOP',
+      'panel.liteNotice': 'Lite mode: cards are hidden and only search remains. Click "Cost" at the top right to switch back.',
+      'src.sop': 'Library',
+      'src.standards': 'Pricing basis',
+      'src.prices': 'Material prices',
+      'src.changes': 'Variations',
       'src.glossary': 'Terms',
-      'src.email': 'Email',
       'src.recording': 'Recording',
+      'src.calc': 'Calculator',
       'insert.pending.title': 'Composer already has a draft',
       'insert.append': 'Append',
       'insert.overwrite': 'Overwrite',
@@ -177,7 +503,7 @@ window.__ModuleLoader__.load({
       'sop.folder': 'Folder',
       'sop.filename': 'File name',
       'sop.creating': 'New note',
-      'sop.newTitle': 'e.g. Due diligence checklist',
+      'sop.newTitle': 'e.g. Tender workflow',
       'sop.editing': 'Edit note',
       'sop.body': 'Body (Markdown)',
       'sop.pickNote': 'Pick a note on the left',
@@ -185,26 +511,6 @@ window.__ModuleLoader__.load({
       'sop.nav': 'Explorer',
       'sop.showNav': 'Show explorer',
       'sop.hideNav': 'Hide explorer',
-      'pkulaw.available': 'Available',
-      'pkulaw.expiring': 'Expiring',
-      'pkulaw.nearest': 'Nearest expiry',
-      'pkulaw.claimed': 'Claimed today (inferred)',
-      'pkulaw.notClaimed': 'Not claimed today (inferred)',
-      'pkulaw.claim': 'Claim points',
-      'pkulaw.refresh': 'Refresh balance',
-      'pkulaw.stale': 'using stale value',
-      'pkulaw.idle': 'Refresh to read the balance (0 points per call)',
-      'pkulaw.expand': 'Expand',
-      'pkulaw.collapse': 'Collapse',
-      'pkulaw.low': 'Low balance',
-      'pkulaw.lowHint': 'Fewer than 100 points left — claim today\'s points before using Pkulaw search.',
-      'email.hard': 'Hard rules',
-      'email.soft': 'Soft rules',
-      'email.watch': 'Watching',
-      'email.absorbed': 'Absorbed drafts',
-      'email.lastMerge': 'Last merge',
-      'email.draft': 'New draft',
-      'email.rules': 'View rules',
       'glossary.search': 'Search Chinese / English / field',
       'glossary.add': 'Add',
       'glossary.edit': 'Edit',
@@ -219,11 +525,81 @@ window.__ModuleLoader__.load({
       'glossary.en': 'English',
       'glossary.field': 'Field',
       'glossary.tag': 'Tag',
-      'glossary.tagHint': 'Separate tags with commas, e.g. 句式, 待核',
+      'glossary.tagHint': 'Separate tags with commas, e.g. BOQ, to-check',
       'glossary.note': 'Note',
-      'reimburse.template': 'Template',
-      'reimburse.missing': 'Template not configured',
-      'reimburse.insert': 'Insert form prompt',
+      'glossary.heading': 'Cost glossary',
+      'table.search': 'Search…',
+      'table.add': 'Add',
+      'table.edit': 'Edit',
+      'table.del': 'Delete',
+      'table.save': 'Save',
+      'table.cancel': 'Cancel',
+      'table.copy': 'Copy',
+      'table.insert': 'Insert',
+      'table.empty': 'No records yet — press Add',
+      'table.total': 'records',
+      'table.creating': 'New record',
+      'table.editing': 'Edit record',
+      'table.confirmDelete': 'Delete this record?',
+      'table.needKey': 'Fill in the key field first',
+      'table.added': 'Added',
+      'table.saved': 'Saved',
+      'table.deleted': 'Deleted',
+      'table.failed': 'Failed: ',
+      'standards.title': 'Pricing basis',
+      'standards.sub': 'BOQ codes, consumption quotas, area rules, contract templates',
+      'standards.field.code': 'Code',
+      'standards.field.name': 'Name',
+      'standards.field.category': 'Category',
+      'standards.field.version': 'Version',
+      'standards.field.date': 'Effective date',
+      'standards.field.note': 'Note',
+      'prices.title': 'Material prices',
+      'prices.sub': 'Quotes and published prices for pricing and claims',
+      'prices.field.name': 'Material',
+      'prices.field.spec': 'Spec',
+      'prices.field.unit': 'Unit',
+      'prices.field.price': 'Price',
+      'prices.field.region': 'Region',
+      'prices.field.date': 'Date',
+      'prices.field.source': 'Source',
+      'changes.title': 'Variations',
+      'changes.sub': 'Variation, daywork and claim ledger',
+      'changes.field.code': 'Code',
+      'changes.field.project': 'Project',
+      'changes.field.reason': 'Reason',
+      'changes.field.amount': 'Amount',
+      'changes.field.date': 'Date',
+      'changes.field.status': 'Status',
+      'calc.title': 'Cost calculator',
+      'calc.sub': 'Unit price, total cost, rebar, indicators, conversion',
+      'calc.unitPrice': 'Comprehensive unit price',
+      'calc.totalCost': 'Total cost',
+      'calc.rebar': 'Rebar theoretical weight',
+      'calc.indicators': 'Unit indicators',
+      'calc.convert': 'Unit conversion',
+      'calc.labor': 'Labour',
+      'calc.material': 'Material',
+      'calc.machine': 'Machine',
+      'calc.overhead': 'Overhead %',
+      'calc.profit': 'Profit %',
+      'calc.fee': 'Statutory fee',
+      'calc.tax': 'Tax %',
+      'calc.subtotal': 'Subtotal works',
+      'calc.measures': 'Measures',
+      'calc.others': 'Others',
+      'calc.area': 'Floor area',
+      'calc.steel': 'Total rebar',
+      'calc.costPerArea': 'Cost per m²',
+      'calc.steelPerArea': 'Steel per m²',
+      'calc.diameter': 'Diameter (mm)',
+      'calc.rebarHint': 'Comma-separated, e.g. 16,20,25',
+      'calc.value': 'Value',
+      'calc.from': 'From',
+      'calc.to': 'To',
+      'calc.result': 'Result',
+      'calc.calculate': 'Calculate',
+      'calc.invalid': 'Please enter a number',
       'state.ok': 'present',
       'state.missing': 'missing',
       'state.denied': 'denied',
@@ -795,6 +1171,7 @@ window.__ModuleLoader__.load({
 
     return {
       inject: ['slots'],
+      _calc: WB_CALC,
       apply(ctx) {
         const localeStore = {
           subscribe(listener) {
@@ -1048,7 +1425,7 @@ window.__ModuleLoader__.load({
           )
         }
 
-        // 全屏工作台（shell.overlay）+ ⌥W 热键
+        // 全屏工作台（shell.overlay）+ Alt+W 热键（macOS 上是 ⌥W）
         try {
           ctx.slots.inject('shell.overlay', () => {
             try {
@@ -1158,9 +1535,22 @@ window.__ModuleLoader__.load({
               return 13
             }
           })
-          const [pkOpen, setPkOpen] = React.useState(false)
-          const [pk, setPk] = React.useState({ status: 'loading', available: null, low: false, stale: false, error: false })
           const [usage, setUsage] = React.useState({ deepseek: null, volc: null })
+          /** 双模式：cost = 造价模式（全部卡片）；lite = 普通模式（卡片全隐藏，只留搜索）。 */
+          const [mode, setMode] = React.useState(() => {
+            try {
+              return window.localStorage.getItem('dsh-cost-workbench.mode') === 'lite' ? 'lite' : 'cost'
+            } catch {
+              return 'cost'
+            }
+          })
+          React.useEffect(() => {
+            try {
+              window.localStorage.setItem('dsh-cost-workbench.mode', mode)
+            } catch {
+              // 隐私模式下写不了 localStorage 也不影响使用。
+            }
+          }, [mode])
 
           /** 消费之后强制取一次用量（平时不轮询）。 */
           const refreshUsage = React.useCallback(() => {
@@ -1194,7 +1584,7 @@ window.__ModuleLoader__.load({
 
           // 首次使用：还没有配置 Obsidian 库时，先显示引导，不去请求那些会返回 409 的接口
           const [setup, setSetup] = React.useState(null)
-          const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: 'SOP', recordingsDir: 'Recordings' })
+          const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录' })
           const [setupBusy, setSetupBusy] = React.useState(false)
           React.useEffect(() => {
             let alive = true
@@ -1202,7 +1592,7 @@ window.__ModuleLoader__.load({
               (data) => {
                 if (!alive) return
                 setSetup(data)
-                if (data.configured !== true) setSetupDraft({ vaultRoot: '', sopDir: data.sopDir ?? 'SOP', recordingsDir: data.recordingsDir ?? 'Recordings' })
+                if (data.configured !== true) setSetupDraft({ vaultRoot: '', sopDir: data.sopDir ?? '00 资料库', recordingsDir: data.recordingsDir ?? '会议记录' })
               },
               () => { if (alive) setSetup({ configured: false, error: true }) },
             )
@@ -1234,15 +1624,6 @@ window.__ModuleLoader__.load({
               (data) => { if (alive) setUsage({ deepseek: data.deepseek ?? null, volc: data.volc ?? null }) },
               () => { if (alive) setUsage({ deepseek: null, volc: null }) },
             )
-            api('/pkulaw').then(
-              (data) => {
-                if (!alive) return
-                const balance = data.balance ?? {}
-                const available = Number.isFinite(balance.availablePoints) ? balance.availablePoints : null
-                setPk({ status: 'ready', available, low: available !== null && available < 100, stale: balance.stale === true, error: false })
-              },
-              () => { if (alive) setPk({ status: 'error', available: null, low: false, stale: false, error: true }) },
-            )
             return () => { alive = false }
           }, [reloadKey, setup === null ? 'pending' : (setup.configured === true ? 'ready' : 'unconfigured')])
 
@@ -1252,7 +1633,7 @@ window.__ModuleLoader__.load({
             return () => clearTimeout(timer)
           }, [flash])
 
-          // 全局搜索：笔记正文 + 术语 + 邮件规则，混排并标注来源。
+          // 全局搜索：笔记正文 + 术语 + 造价三表 + 录音，混排并标注来源。
           React.useEffect(() => {
             const text = query.trim()
             if (text === '') {
@@ -1383,12 +1764,10 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               className: 'dsh-wb-badge-btn',
-              'data-state': pk.error ? 'error' : pk.low ? 'warn' : pk.stale ? 'warn' : 'ok',
-              title: '法宝积分',
-              onClick: () => setPkOpen((value) => !value),
+              title: t('mode.hint'),
+              onClick: () => setMode((value) => (value === 'cost' ? 'lite' : 'cost')),
             },
-              h('span', null, '法宝'),
-              pk.available !== null ? h('b', null, String(pk.available)) : h('span', null, pk.status === 'loading' ? '…' : '—'),
+              h('span', null, mode === 'cost' ? t('mode.cost') : t('mode.lite')),
             ),
             h('button', {
               type: 'button',
@@ -1430,14 +1809,8 @@ window.__ModuleLoader__.load({
             }, card.title)),
           )
 
-          // placement:"strip" 的卡片不再渲染成状态条：法宝现在是工具条右上角的角标 + 弹层。
+          // 状态条卡片：内置卡里没有 placement:"strip" 的卡，保留变量便于将来扩展。
           const stripRow = null
-          const pkPopover = !pkOpen ? null : h('div', { className: 'dsh-wb-popover' },
-            h(PkulawCard, { card: { title: '法宝积分' }, t }),
-            h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '6px' } },
-              h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => setPkOpen(false) }, '收起'),
-            ),
-          )
 
           const searchRow = h('div', { className: 'dsh-wb-searchrow' },
             h('input', {
@@ -1478,6 +1851,7 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'dsh-wb-row-actions' },
                   hit.source === 'sop'
                     ? h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => {
+                        if (mode === 'lite') setMode('cost')
                         const target = cards.find((candidate) => candidate.kind === 'sop')
                         setActiveId(target === undefined ? 'sop' : target.id)
                         setQuery('')
@@ -1492,30 +1866,31 @@ window.__ModuleLoader__.load({
                     : null,
                   hit.source === 'recording'
                     ? h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => {
+                        if (mode === 'lite') setMode('cost')
                         const target = cards.find((candidate) => candidate.kind === 'recorder')
                         setActiveId(target === undefined ? 'recorder' : target.id)
                         setQuery('')
                         setFocusRecording(hit.path)
-                      } }, '去录音')
+                      } }, '去会议记录')
                     : null,
-                  hit.source === 'email'
+                  ['standards', 'prices', 'changes'].includes(hit.source)
                     ? h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => {
-                        const target = cards.find((candidate) => candidate.kind === 'email')
-                        setActiveId(target === undefined ? 'email' : target.id)
+                        if (mode === 'lite') setMode('cost')
+                        const target = cards.find((candidate) => candidate.kind === hit.source)
+                        setActiveId(target === undefined ? hit.source : target.id)
                         setQuery('')
                       } }, t('panel.openCard'))
                     : null,
                 ),
               )),
             )
-          } else if (activeCard !== null) {
+          } else if (activeCard !== null && mode === 'cost') {
             const shared = { key: activeCard.id, card: activeCard, t, requestInsert, insertPrompt, prompts, setFlash, vault, insertNote, focusMode, setFocusMode, onUsageChanged: refreshUsage, refreshTick, ...(activeCard.kind === 'recorder' ? { focusRecording, onRecordingHandled: () => setFocusRecording(null) } : {}) }
             if (activeCard.kind === 'sop') body = h(SopCard, { ...shared, focusNote, onFocusHandled: () => setFocusNote(null) })
-            else if (activeCard.kind === 'pkulaw') body = h(PkulawCard, shared)
-            else if (activeCard.kind === 'email') body = h(EmailCard, shared)
+            else if (activeCard.kind === 'standards' || activeCard.kind === 'prices' || activeCard.kind === 'changes') body = h(TableCard, shared)
+            else if (activeCard.kind === 'calc') body = h(CalcCard, shared)
             else if (activeCard.kind === 'recorder') body = h(RecorderCard, shared)
             else if (activeCard.kind === 'glossary') body = h(EntryCard, shared)
-            else if (activeCard.kind === 'reimburse') body = h(ReimburseCard, shared)
             else if (activeCard.kind === 'prompt') body = h(PromptCard, shared)
             else body = h(CardShell, { t, title: activeCard.title, state: 'unsupported', stateText: t('state.unsupported') },
               h('p', { className: 'dsh-wb-note' }, t('panel.unsupported') + '：' + activeCard.kind))
@@ -1554,11 +1929,11 @@ window.__ModuleLoader__.load({
                   h('div', { className: 'dsh-wb-note' }, '笔记文件夹的完整路径（Obsidian 库，或任意文件夹都可以）'),
                   h('input', {
                     className: 'dsh-wb-input', style: { marginTop: '4px' },
-                    placeholder: '/Users/你的名字/Documents/Obsidian',
+                    placeholder: 'E:\\文档\\Obsidian\\造价工作台',
                     value: setupDraft.vaultRoot,
                     onChange: (event) => setSetupDraft({ ...setupDraft, vaultRoot: event.target.value }),
                   }),
-                  h('div', { className: 'dsh-wb-note', style: { marginTop: '10px' } }, 'SOP 子目录（相对库根目录）'),
+                  h('div', { className: 'dsh-wb-note', style: { marginTop: '10px' } }, '资料库子目录（相对库根目录）'),
                   h('input', {
                     className: 'dsh-wb-input', style: { marginTop: '4px' },
                     value: setupDraft.sopDir,
@@ -1583,20 +1958,22 @@ window.__ModuleLoader__.load({
           }
 
           try {
+            const liteMode = mode === 'lite'
             return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': fontSize + 'px' } },
               h(StyleDefs, null),
               head,
-              focusMode ? null : stripRow,
-              focusMode ? null : tabs,
-              focusMode ? null : searchRow,
+              liteMode || focusMode ? null : stripRow,
+              liteMode || focusMode ? null : tabs,
+              searchRow,
               h('div', { className: 'dsh-wb-body' },
                 warnings.map((warning, index) => h('div', { className: 'dsh-wb-warn', key: index }, warning)),
-                cards.length === 0 && state.status !== 'loading'
-                  ? h('div', { className: 'dsh-wb-note', style: { padding: '12px 0' } },
-                      '没有可显示的卡片：检查 ' + (state.cardsFile ?? 'cards.json') + ' 是否存在且格式正确。')
-                  : body,
+                liteMode && query.trim() === ''
+                  ? h('div', { className: 'dsh-wb-note', style: { padding: '12px 0' } }, t('panel.liteNotice'))
+                  : cards.length === 0 && state.status !== 'loading'
+                    ? h('div', { className: 'dsh-wb-note', style: { padding: '12px 0' } },
+                        '没有可显示的卡片：检查 ' + (state.cardsFile ?? 'cards.json') + ' 是否存在且格式正确。')
+                    : body,
               ),
-              pkPopover,
               bar,
             )
           } catch (error) {
@@ -1611,6 +1988,453 @@ window.__ModuleLoader__.load({
         }
 
         /* ------------------------------------------------------------- SOP */
+
+/* ---------------------------------------------------------------- 三、通用表格卡 */
+
+/**
+ * 三张表共用的表格卡：读、客户端内搜索、增、改、删、行内插入、复制。
+ * 接口形状与 EntryCard 保持一致：card 来自 cards.json（至少带 kind；title 可有可无）。
+ */
+function TableCard({ card, t, requestInsert, setFlash }) {
+  const kind = card !== null && card !== undefined && typeof card.kind === 'string' ? card.kind : 'standards'
+  const config = WB_TABLES[kind] ?? WB_TABLES.standards
+  const [state, setState] = React.useState({ status: 'loading' })
+  const [query, setQuery] = React.useState('')
+  const [editing, setEditing] = React.useState(null)
+  const [busy, setBusy] = React.useState(false)
+
+  /** 拉全量；搜索在客户端过滤，表最多几百行，没必要再请求一次。 */
+  const load = React.useCallback(() => {
+    return api(config.api).then(
+      (data) => setState({ status: 'ready', data }),
+      (error) => setState({ status: 'error', message: error.message }),
+    )
+  }, [config.api])
+
+  React.useEffect(() => { load() }, [load])
+
+  const data = state.status === 'ready' ? state.data : null
+  const entries = data !== null && Array.isArray(data.entries) ? data.entries : []
+  const visible = React.useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (needle === '') return entries
+    return entries.filter((entry) => config.fields.some((field) => String(entry[field.key] ?? '').toLowerCase().includes(needle)))
+  }, [entries, query, config.fields])
+
+  /** 只提交这张表声明过的字段，避免把 id 之类的内部字段回传。 */
+  function payloadOf(source) {
+    const payload = {}
+    for (const field of config.fields) payload[field.key] = source[field.key] ?? ''
+    return payload
+  }
+
+  function blank() {
+    const draft = {}
+    for (const field of config.fields) draft[field.key] = ''
+    return draft
+  }
+
+  /** 插入 / 复制时用来当标签的短名称：前两列非空值。 */
+  function entryLabel(entry) {
+    const parts = config.fields.slice(0, 2)
+      .map((field) => String(entry[field.key] ?? '').trim())
+      .filter((text) => text !== '')
+    return parts.length > 0 ? parts.join(' / ') : String(entry.id ?? '')
+  }
+
+  function save() {
+    if (editing === null || busy) return
+    // 客户端先拦一次主键全空：省一趟请求，也避免把服务端的 400 当成网络错误。
+    const idKeys = config.idKeys ?? []
+    if (idKeys.length > 0 && idKeys.every((key) => String(editing[key] ?? '').trim() === '')) {
+      setEditing((current) => (current === null ? null : { ...current, error: t('table.needKey') }))
+      return
+    }
+    setBusy(true)
+    const isNew = editing.id === undefined
+    const request = isNew
+      ? api(config.api, { method: 'POST', body: payloadOf(editing) })
+      : api(config.api + '/' + encodeURIComponent(editing.id), { method: 'PUT', body: payloadOf(editing) })
+    request.then(
+      () => {
+        setEditing(null)
+        setFlash(wbText(t, isNew ? 'table.added' : 'table.saved', isNew ? '已新增' : '已保存'))
+        load()
+      },
+      (error) => setEditing((current) => (current === null ? null : { ...current, error: error.message })),
+    ).finally(() => setBusy(false))
+  }
+
+  function removeEntry(entry) {
+    if (busy) return
+    if (!window.confirm(t('table.confirmDelete') + '\n' + entryLabel(entry))) return
+    setBusy(true)
+    api(config.api + '/' + encodeURIComponent(entry.id), { method: 'DELETE' }).then(
+      () => { setFlash(wbText(t, 'table.deleted', '已删除')); load() },
+      (error) => setFlash(wbText(t, 'table.failed', '操作失败：') + error.message),
+    ).finally(() => setBusy(false))
+  }
+
+  /** 行内插入：只输出一条 Markdown 数据行（表头交给调用方的上下文，避免重复表头）。 */
+  function insertRow(entry) {
+    const cells = config.fields.map((field) => String(entry[field.key] ?? '')
+      .replace(/\r?\n/g, ' ')
+      .replace(/\|/g, '｜'))
+    requestInsert('| ' + cells.join(' | ') + ' |', entryLabel(entry) || t(config.titleKey))
+  }
+
+  /** 复制：按制表符分隔，粘进 Excel 直接是一行。写剪贴板失败时提示。 */
+  function copyRow(entry) {
+    const text = config.fields.map((field) => String(entry[field.key] ?? '')).join('\t')
+    try {
+      if (typeof navigator === 'undefined' || navigator.clipboard === undefined || typeof navigator.clipboard.writeText !== 'function') {
+        setFlash(t('copy.failed'))
+        return
+      }
+      navigator.clipboard.writeText(text).then(
+        () => setFlash(t('copy.done')),
+        () => setFlash(t('copy.failed')),
+      )
+    } catch {
+      setFlash(t('copy.failed'))
+    }
+  }
+
+  /** 编辑表单就地渲染在对应行下面（新增时渲染在搜索框下面）。 */
+  function renderForm() {
+    if (editing === null) return null
+    return h('div', {
+      style: {
+        marginTop: '8px',
+        padding: '8px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: '8px',
+      },
+    },
+      h('div', { className: 'dsh-wb-row-title', style: { marginBottom: '6px' } },
+        t(editing.id === undefined ? 'table.creating' : 'table.editing')),
+      config.fields.map((field) => h('div', { className: 'dsh-wb-field', key: field.key },
+        h('label', { style: { width: '76px' } }, t(field.labelKey)),
+        h('input', {
+          className: 'dsh-wb-input',
+          value: editing[field.key] ?? '',
+          maxLength: 200,
+          onChange: (event) => {
+            const next = event.target.value
+            setEditing((current) => (current === null ? null : { ...current, [field.key]: next }))
+          },
+          onKeyDown: (event) => { if (event.key === 'Enter' && busy !== true) save() },
+        }),
+      )),
+      editing.error !== undefined ? h('div', { className: 'dsh-wb-error' }, editing.error) : null,
+      h('div', { className: 'dsh-wb-row-actions', style: { justifyContent: 'flex-end' } },
+        h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => setEditing(null) }, t('table.cancel')),
+        h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, t('table.save')),
+      ),
+    )
+  }
+
+  function renderRow(entry) {
+    const first = config.fields[0]
+    const second = config.fields[1]
+    const rest = config.fields.slice(2)
+    const chip = config.chipKey !== undefined ? String(entry[config.chipKey] ?? '') : ''
+    return h('div', { className: 'dsh-wb-row', key: entry.id },
+      h('div', { className: 'dsh-wb-row-title' },
+        h('span', null, String(entry[first.key] ?? '') !== '' ? entry[first.key] : '—'),
+        second !== undefined && String(entry[second.key] ?? '') !== ''
+          ? h('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontWeight: 400 } }, ' · ' + entry[second.key])
+          : null,
+        chip !== '' ? h('span', { className: 'dsh-wb-chip' }, chip) : null,
+      ),
+      rest.length > 0
+        ? h('div', { className: 'dsh-wb-row-meta' },
+            rest.map((field) => t(field.labelKey) + '：' + (String(entry[field.key] ?? '') !== '' ? entry[field.key] : '—')).join(' · '))
+        : null,
+      h('div', { className: 'dsh-wb-row-actions' },
+        h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => insertRow(entry) }, t('table.insert')),
+        h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => copyRow(entry) }, t('table.copy')),
+        h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => setEditing({ ...payloadOf(entry), id: entry.id }) }, t('table.edit')),
+        h('button', { type: 'button', className: 'dsh-wb-btn', disabled: busy, onClick: () => removeEntry(entry) }, t('table.del')),
+      ),
+      editing !== null && editing.id === entry.id ? renderForm() : null,
+    )
+  }
+
+  const fallbackTitle = t(config.titleKey)
+  const title = card !== null && card !== undefined && typeof card.title === 'string' && card.title !== ''
+    ? card.title
+    : fallbackTitle
+  const stateName = state.status === 'error'
+    ? 'error'
+    : state.status === 'loading'
+      ? 'idle'
+      : data !== null && data.exists === false
+        ? 'missing'
+        : 'ok'
+  const stateText = state.status === 'loading'
+    ? t('panel.loading')
+    : state.status === 'error'
+      ? t('state.error')
+      : data !== null && Number.isFinite(data.total)
+        ? String(data.total) + ' ' + t('table.total')
+        : undefined
+  const actions = [
+    h('button', {
+      key: 'refresh', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet',
+      onClick: () => load(),
+    }, t('panel.refresh')),
+    h('button', {
+      key: 'add', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'outline',
+      onClick: () => setEditing(blank()),
+    }, t('table.add')),
+  ]
+
+  return h(CardShell, { t, title, state: stateName, stateText, actions, note: t(config.subKey) },
+    h('input', {
+      className: 'dsh-wb-input',
+      value: query,
+      placeholder: t('table.search'),
+      onChange: (event) => setQuery(event.target.value),
+    }),
+    editing !== null && editing.id === undefined ? renderForm() : null,
+    data !== null && data.warning !== undefined ? h('div', { className: 'dsh-wb-error', style: { marginTop: '8px' } }, data.warning) : null,
+    state.status === 'error' ? h('div', { className: 'dsh-wb-error', style: { marginTop: '8px' } }, state.message) : null,
+    state.status === 'error'
+      ? h('div', { className: 'dsh-wb-row-actions', style: { justifyContent: 'flex-end' } },
+          h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => load() }, t('panel.retry')),
+        )
+      : null,
+    state.status === 'loading' ? h('div', { className: 'dsh-wb-loading' }, t('panel.loading')) : null,
+    state.status === 'ready' && visible.length === 0
+      ? h('p', { className: 'dsh-wb-note' }, query.trim() === '' ? t(config.emptyKey) : t('panel.searchEmpty'))
+      : null,
+    state.status === 'ready' && visible.length > 0
+      ? h('div', { style: { marginTop: '8px' } }, visible.map(renderRow))
+      : null,
+  )
+}
+
+/* ---------------------------------------------------------------- 四、造价计算器 */
+
+/**
+ * 造价计算器：纯前端、零请求。五个分区各自「填数 → 点计算 → 看结果」。
+ * 所有公式都走 WB_CALC，本组件只负责取值、校验展示与排版。
+ */
+function CalcCard({ t }) {
+  const [compositeDraft, setCompositeDraft] = React.useState({
+    labor: '', material: '', machine: '', overheadRate: '10', profitRate: '5', fee: '0', taxRate: '9',
+  })
+  const [compositeResult, setCompositeResult] = React.useState({ status: 'idle' })
+  const [totalDraft, setTotalDraft] = React.useState({ direct: '', measures: '', other: '', fee: '0', taxRate: '9' })
+  const [totalResult, setTotalResult] = React.useState({ status: 'idle' })
+  const [rebarDraft, setRebarDraft] = React.useState('12, 16, 20, 25')
+  const [rebarResult, setRebarResult] = React.useState({ status: 'idle' })
+  const [areaDraft, setAreaDraft] = React.useState({ total: '', area: '', steel: '' })
+  const [areaResult, setAreaResult] = React.useState({ status: 'idle' })
+  const [convertDraft, setConvertDraft] = React.useState({ value: '1', from: 'm3', to: 'l' })
+  const [convertResult, setConvertResult] = React.useState({ status: 'idle' })
+
+  /** 一个数字输入行：label + input。 */
+  function numberField(key, labelKey, value, onChange) {
+    return h('div', { className: 'dsh-wb-field', key },
+      h('label', { style: { width: '76px' } }, t(labelKey)),
+      h('input', {
+        className: 'dsh-wb-input',
+        value,
+        inputMode: 'decimal',
+        onChange: (event) => onChange(event.target.value),
+      }),
+    )
+  }
+
+  /** 一个分区外壳：标题 + 内容。 */
+  function section(key, titleKey, children) {
+    return h('div', { className: 'dsh-wb-card', key, style: { marginTop: '10px' } },
+      h('div', { className: 'dsh-wb-row-title', style: { marginBottom: '6px' } }, t(titleKey)),
+      children,
+    )
+  }
+
+  /** 分区底部的「计算」按钮。 */
+  function calculateButton(key, onClick) {
+    return h('div', { className: 'dsh-wb-row-actions', key, style: { justifyContent: 'flex-end' } },
+      h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick }, t('calc.calculate')),
+    )
+  }
+
+  /** 单值结果的统一渲染：非法 →「请输入数字」，正常 → 两位小数 + 单位。 */
+  function resultText(key, result, labelText, suffix) {
+    if (result.status === 'invalid') {
+      return h('div', { className: 'dsh-wb-error', key, style: { marginTop: '6px' } }, t('calc.invalid'))
+    }
+    if (result.status !== 'ok') return null
+    return h('div', { className: 'dsh-wb-row-meta', key, style: { marginTop: '6px' } },
+      labelText + '：' + wbFixed(result.value) + (suffix ?? ''))
+  }
+
+  function unitLabel(code) {
+    const found = WB_CALC_UNITS.find((unit) => unit.code === code)
+    return found !== undefined ? found.label : code
+  }
+
+  /* ---- ① 综合单价 —— 组价公式 */
+  function calculateComposite() {
+    const value = WB_CALC.unitPrice(compositeDraft)
+    setCompositeResult(Number.isFinite(value) ? { status: 'ok', value } : { status: 'invalid' })
+  }
+
+  /* ---- ② 总造价 */
+  function calculateTotal() {
+    const value = WB_CALC.totalCost(totalDraft)
+    setTotalResult(Number.isFinite(value) ? { status: 'ok', value } : { status: 'invalid' })
+  }
+
+  /* ---- ③ 钢筋理论重量（批量，逗号 / 空格 / 分号 / 换行分隔） */
+  function calculateRebar() {
+    const tokens = rebarDraft.split(/[,，;；\s]+/).map((token) => token.trim()).filter((token) => token !== '')
+    if (tokens.length === 0) {
+      setRebarResult({ status: 'invalid' })
+      return
+    }
+    const rows = []
+    for (const token of tokens) {
+      const weight = WB_CALC.rebarWeight(token)
+      if (!Number.isFinite(weight)) {
+        setRebarResult({ status: 'invalid' })
+        return
+      }
+      rows.push({ diameter: token, weight })
+    }
+    setRebarResult({ status: 'ok', rows })
+  }
+
+  function renderRebarResult() {
+    if (rebarResult.status === 'invalid') {
+      return h('div', { className: 'dsh-wb-error', key: 'rebar-error', style: { marginTop: '6px' } }, t('calc.invalid'))
+    }
+    if (rebarResult.status !== 'ok') return null
+    return h('div', { key: 'rebar-out', style: { marginTop: '6px' } },
+      rebarResult.rows.map((row, index) => h('div', { className: 'dsh-wb-row-meta', key: index },
+        'Ø' + row.diameter + ' → ' + wbFixed(row.weight) + ' kg/m')),
+    )
+  }
+
+  /* ---- ④ 单位造价与含钢量 */
+  function calculateArea() {
+    const cost = WB_CALC.costPerArea(areaDraft.total, areaDraft.area)
+    const steel = WB_CALC.steelPerArea(areaDraft.steel, areaDraft.area)
+    if (!Number.isFinite(cost) || !Number.isFinite(steel)) {
+      setAreaResult({ status: 'invalid' })
+      return
+    }
+    setAreaResult({ status: 'ok', cost, steel })
+  }
+
+  function renderAreaResult() {
+    if (areaResult.status === 'invalid') {
+      return h('div', { className: 'dsh-wb-error', key: 'area-error', style: { marginTop: '6px' } }, t('calc.invalid'))
+    }
+    if (areaResult.status !== 'ok') return null
+    return h('div', { key: 'area-out', style: { marginTop: '6px' } },
+      h('div', { className: 'dsh-wb-row-meta' }, wbText(t, 'calc.costPerArea', '单位造价') + '：' + wbFixed(areaResult.cost) + ' 元/m²'),
+      h('div', { className: 'dsh-wb-row-meta' }, wbText(t, 'calc.steelPerArea', '含钢量') + '：' + wbFixed(areaResult.steel) + ' kg/m²'),
+    )
+  }
+
+  /* ---- ⑤ 单位换算 */
+  function calculateConvert() {
+    const amount = wbNumber(convertDraft.value)
+    if (!Number.isFinite(amount)) {
+      setConvertResult({ status: 'invalid' })
+      return
+    }
+    const value = WB_CALC.convert(amount, convertDraft.from, convertDraft.to)
+    setConvertResult(Number.isFinite(value) ? { status: 'ok', value } : { status: 'mismatch' })
+  }
+
+  function renderConvertResult() {
+    if (convertResult.status === 'invalid') {
+      return h('div', { className: 'dsh-wb-error', key: 'convert-invalid', style: { marginTop: '6px' } }, t('calc.invalid'))
+    }
+    if (convertResult.status === 'mismatch') {
+      return h('div', { className: 'dsh-wb-error', key: 'convert-mismatch', style: { marginTop: '6px' } },
+        wbText(t, 'calc.unitMismatch', '单位类型不一致'))
+    }
+    if (convertResult.status !== 'ok') return null
+    return h('div', { className: 'dsh-wb-row-meta', style: { marginTop: '6px' } },
+      t('calc.result') + '：' + wbFixed(convertResult.value) + ' ' + unitLabel(convertDraft.to))
+  }
+
+  function updateConvert(patch) {
+    setConvertDraft((current) => ({ ...current, ...patch }))
+  }
+
+  return h(CardShell, { t, title: t('calc.title'), note: t('calc.sub') },
+    section('composite', 'calc.unitPrice', [
+      numberField('labor', 'calc.labor', compositeDraft.labor, (value) => setCompositeDraft((current) => ({ ...current, labor: value }))),
+      numberField('material', 'calc.material', compositeDraft.material, (value) => setCompositeDraft((current) => ({ ...current, material: value }))),
+      numberField('machine', 'calc.machine', compositeDraft.machine, (value) => setCompositeDraft((current) => ({ ...current, machine: value }))),
+      numberField('overheadRate', 'calc.overhead', compositeDraft.overheadRate, (value) => setCompositeDraft((current) => ({ ...current, overheadRate: value }))),
+      numberField('profitRate', 'calc.profit', compositeDraft.profitRate, (value) => setCompositeDraft((current) => ({ ...current, profitRate: value }))),
+      numberField('fee', 'calc.fee', compositeDraft.fee, (value) => setCompositeDraft((current) => ({ ...current, fee: value }))),
+      numberField('taxRate', 'calc.tax', compositeDraft.taxRate, (value) => setCompositeDraft((current) => ({ ...current, taxRate: value }))),
+      calculateButton('composite-actions', calculateComposite),
+      resultText('composite-result', compositeResult, t('calc.unitPrice')),
+    ]),
+    section('total', 'calc.totalCost', [
+      numberField('direct', 'calc.subtotal', totalDraft.direct, (value) => setTotalDraft((current) => ({ ...current, direct: value }))),
+      numberField('measures', 'calc.measures', totalDraft.measures, (value) => setTotalDraft((current) => ({ ...current, measures: value }))),
+      numberField('other', 'calc.others', totalDraft.other, (value) => setTotalDraft((current) => ({ ...current, other: value }))),
+      numberField('fee', 'calc.fee', totalDraft.fee, (value) => setTotalDraft((current) => ({ ...current, fee: value }))),
+      numberField('taxRate', 'calc.tax', totalDraft.taxRate, (value) => setTotalDraft((current) => ({ ...current, taxRate: value }))),
+      calculateButton('total-actions', calculateTotal),
+      resultText('total-result', totalResult, t('calc.totalCost')),
+    ]),
+    section('rebar', 'calc.rebar', [
+      h('div', { className: 'dsh-wb-field', key: 'rebar' },
+        h('label', { style: { width: '76px' } }, t('calc.diameter')),
+        h('textarea', {
+          className: 'dsh-wb-textarea',
+          style: { minHeight: '52px', fontFamily: 'inherit' },
+          value: rebarDraft,
+          placeholder: t('calc.rebarHint'),
+          onChange: (event) => setRebarDraft(event.target.value),
+        }),
+      ),
+      calculateButton('rebar-actions', calculateRebar),
+      renderRebarResult(),
+    ]),
+    section('area', 'calc.indicators', [
+      numberField('total', 'calc.totalCost', areaDraft.total, (value) => setAreaDraft((current) => ({ ...current, total: value }))),
+      numberField('area', 'calc.area', areaDraft.area, (value) => setAreaDraft((current) => ({ ...current, area: value }))),
+      numberField('steel', 'calc.steel', areaDraft.steel, (value) => setAreaDraft((current) => ({ ...current, steel: value }))),
+      calculateButton('area-actions', calculateArea),
+      renderAreaResult(),
+    ]),
+    section('convert', 'calc.convert', [
+      numberField('value', 'calc.value', convertDraft.value, (value) => updateConvert({ value })),
+      h('div', { className: 'dsh-wb-field', key: 'from' },
+        h('label', { style: { width: '76px' } }, t('calc.from')),
+        h('select', {
+          className: 'dsh-wb-input',
+          value: convertDraft.from,
+          onChange: (event) => updateConvert({ from: event.target.value }),
+        }, WB_CALC_UNITS.map((unit) => h('option', { key: unit.code, value: unit.code }, unit.label))),
+      ),
+      h('div', { className: 'dsh-wb-field', key: 'to' },
+        h('label', { style: { width: '76px' } }, t('calc.to')),
+        h('select', {
+          className: 'dsh-wb-input',
+          value: convertDraft.to,
+          onChange: (event) => updateConvert({ to: event.target.value }),
+        }, WB_CALC_UNITS.map((unit) => h('option', { key: unit.code, value: unit.code }, unit.label))),
+      ),
+      calculateButton('convert-actions', calculateConvert),
+      renderConvertResult(),
+    ]),
+  )
+}
 
         function SopCard({ card, t, requestInsert, setFlash, vault, focusNote, onFocusHandled, focusMode, setFocusMode, refreshTick = 0 }) {
           const [state, setState] = React.useState({ status: 'loading' })
@@ -3091,370 +3915,9 @@ window.__ModuleLoader__.load({
           )
         }
 
-        /* ---------------------------------------------------------- 法宝积分 */
+        /* ---------------------------------------------------------- 术语表 */
 
         /** 状态条：不占 tab 的卡片（cards.json 里 placement: "strip"），默认一行，点开看详情。 */
-        function PkulawStrip({ card, t }) {
-          const [state, setState] = React.useState({ status: 'loading' })
-          const [busy, setBusy] = React.useState(false)
-          const [expanded, setExpanded] = React.useState(false)
-
-          const load = React.useCallback((force) => {
-            setBusy(true)
-            return api(force === true ? '/pkulaw/refresh' : '/pkulaw', force === true ? { method: 'POST' } : undefined).then(
-              (data) => setState({ status: 'ready', data }),
-              (error) => setState({ status: 'error', message: error.message }),
-            ).finally(() => setBusy(false))
-          }, [])
-
-          React.useEffect(() => { load(false) }, [load])
-
-          const data = state.status === 'ready' ? state.data : null
-          const balance = data !== null ? data.balance : null
-          const portal = balance !== null && typeof balance.portalPointsUrl === 'string' ? balance.portalPointsUrl : 'https://mcp.pkulaw.com/console/points'
-          const available = balance !== null && Number.isFinite(balance.availablePoints) ? balance.availablePoints : null
-          const low = available !== null && available < 100
-          const stale = balance !== null && balance.stale === true
-          const failed = state.status === 'error'
-          // 余额低只标红，不再自动展开（未领取时会被误当成"异常"一直占地方）。
-          const open = expanded || stale || failed
-
-          return h('div', { className: 'dsh-wb-strip', 'data-state': failed ? 'error' : (low ? 'warn' : 'ok') },
-            h('button', {
-              type: 'button',
-              className: 'dsh-wb-strip-main',
-              onClick: () => setExpanded((value) => !value),
-            },
-              h('span', { className: 'dsh-wb-strip-title' }, card.title),
-              failed
-                ? h('span', { className: 'dsh-wb-strip-text' }, state.message)
-                : balance === null
-                  ? h('span', { className: 'dsh-wb-strip-text' }, busy ? t('panel.loading') : t('pkulaw.idle'))
-                  : h('span', { className: 'dsh-wb-strip-text' },
-                      t('pkulaw.available') + ' ' + (available === null ? '—' : available),
-                      Number.isFinite(balance.expiringPoints) ? ' · ' + t('pkulaw.expiring') + ' ' + balance.expiringPoints : '',
-                      balance.nearestExpireOn ? ' · ' + balance.nearestExpireOn : '',
-                      stale ? ' · ' + t('pkulaw.stale') : '',
-                    ),
-              balance !== null && balance.claimedToday === true ? h('span', { className: 'dsh-wb-chip', 'data-state': 'ok' }, t('pkulaw.claimed')) : null,
-              balance !== null && balance.claimedToday === false ? h('span', { className: 'dsh-wb-chip', 'data-state': 'idle' }, t('pkulaw.notClaimed')) : null,
-              low ? h('span', { className: 'dsh-wb-chip', 'data-state': 'missing' }, t('pkulaw.low')) : null,
-            ),
-            h('button', { type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', disabled: busy, onClick: () => load(true), title: t('pkulaw.refresh'), 'aria-label': t('pkulaw.refresh') }, h(IconRefresh, null)),
-            h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => setExpanded((value) => !value) }, open ? t('pkulaw.collapse') : t('pkulaw.expand')),
-            open
-              ? h('div', { className: 'dsh-wb-strip-detail' },
-                  h('div', { className: 'dsh-wb-metrics' },
-                    h('span', null, t('pkulaw.available') + ' ', h('b', null, available === null ? '—' : available)),
-                    balance !== null && balance.accountStatus ? h('span', null, balance.accountStatus) : null,
-                    low ? h('span', null, t('pkulaw.lowHint')) : null,
-                  ),
-                  h('div', { className: 'dsh-wb-row-actions' },
-                    h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => window.open(portal, '_blank') }, t('pkulaw.claim')),
-                  ),
-                )
-              : null,
-          )
-        }
-
-        function PkulawCard({ card, t }) {
-          const [state, setState] = React.useState({ status: 'loading' })
-          const [busy, setBusy] = React.useState(false)
-          const [expanded, setExpanded] = React.useState(false)
-
-          const load = React.useCallback((force) => {
-            setBusy(true)
-            return api(force === true ? '/pkulaw/refresh' : '/pkulaw', force === true ? { method: 'POST' } : undefined).then(
-              (data) => setState({ status: 'ready', data }),
-              (error) => setState({ status: 'error', message: error.message }),
-            ).finally(() => setBusy(false))
-          }, [])
-
-          React.useEffect(() => { load(false) }, [load])
-
-          const data = state.status === 'ready' ? state.data : null
-          const balance = data !== null ? data.balance : null
-          const portal = balance !== null && typeof balance.portalPointsUrl === 'string' ? balance.portalPointsUrl : 'https://mcp.pkulaw.com/console/points'
-          const available = balance !== null && Number.isFinite(balance.availablePoints) ? balance.availablePoints : null
-          const low = available !== null && available < 100
-          const stale = balance !== null && balance.stale === true
-          // 异常（读不到 / 余额不足 / 用的是旧值）自动展开，平时就是一行。
-          const abnormal = state.status === 'error' || low || stale
-          const open = expanded || abnormal
-
-          const actions = [
-            h('button', { key: 'refresh', type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', disabled: busy, onClick: () => load(true), title: t('pkulaw.refresh'), 'aria-label': t('pkulaw.refresh') }, h(IconRefresh, null)),
-            h('button', { key: 'toggle', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => setExpanded((value) => !value) }, open ? t('pkulaw.collapse') : t('pkulaw.expand')),
-          ]
-
-          return h(CardShell, {
-            t,
-            title: card.title,
-            state: state.status === 'error' ? 'error' : (low ? 'missing' : 'ready'),
-            stateText: state.status === 'error' ? t('state.error') : (low ? t('pkulaw.low') : undefined),
-            actions,
-          },
-            state.status === 'error' ? h('div', { className: 'dsh-wb-error' }, state.message) : null,
-            busy && balance === null ? h('div', { className: 'dsh-wb-loading' }, t('panel.loading')) : null,
-            balance !== null
-              ? h('div', { className: 'dsh-wb-metrics' },
-                  h('span', null, t('pkulaw.available') + ' ', h('b', null, available === null ? '—' : available)),
-                  Number.isFinite(balance.expiringPoints) ? h('span', null, t('pkulaw.expiring') + ' ' + balance.expiringPoints) : null,
-                  balance.nearestExpireOn ? h('span', null, t('pkulaw.nearest') + ' ' + balance.nearestExpireOn) : null,
-                  h('span', { className: 'dsh-wb-chip', 'data-state': balance.claimedToday === true ? 'ok' : 'idle' },
-                    balance.claimedToday === true ? t('pkulaw.claimed') : t('pkulaw.notClaimed')),
-                  stale ? h('span', { className: 'dsh-wb-chip', 'data-state': 'missing' }, t('pkulaw.stale')) : null,
-                )
-              : !busy
-                ? h('p', { className: 'dsh-wb-note' }, t('pkulaw.idle'))
-                : null,
-            low ? h('p', { className: 'dsh-wb-note' }, t('pkulaw.lowHint')) : null,
-            data !== null && typeof data.warning === 'string' ? h('p', { className: 'dsh-wb-note' }, data.warning) : null,
-            open && balance !== null
-              ? h('div', { style: { marginTop: '8px' } },
-                  h('div', { className: 'dsh-wb-big' }, available === null ? '—' : available),
-                  h('div', { className: 'dsh-wb-metrics', style: { marginTop: '4px' } },
-                    h('span', null, t('pkulaw.available')),
-                    balance.accountStatus ? h('span', null, balance.accountStatus) : null,
-                  ),
-                  h('div', { className: 'dsh-wb-row-actions' },
-                    h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => window.open(portal, '_blank') }, t('pkulaw.claim')),
-                  ),
-                )
-              : null,
-          )
-        }
-
-        /* ---------------------------------------------------------- 邮件起草 */
-
-        function EmailCard({ card, t, insertPrompt, setFlash }) {
-          const [items, setItems] = React.useState(null)
-          const [filter, setFilter] = React.useState('all')
-          const [drafts, setDrafts] = React.useState(null)
-          const [openDraft, setOpenDraft] = React.useState(null)
-          const [busy, setBusy] = React.useState(false)
-          const [editing, setEditing] = React.useState(null)
-          const [draft, setDraft] = React.useState(null)
-          const stats = card.stats ?? null
-
-          React.useEffect(() => {
-            if (filter !== 'absorbed' || drafts !== null) return
-            api('/email/drafts').then(
-              (data) => setDrafts(Array.isArray(data.items) ? data.items : []),
-              () => setDrafts([]),
-            )
-          }, [filter, drafts])
-
-          React.useEffect(() => {
-            api('/email/rules').then(
-              (data) => setItems(Array.isArray(data.items) ? data.items : []),
-              () => setItems([]),
-            )
-          }, [])
-
-          /** 强度归一：把「软（待观察，命中 1/3）」这类长文本压成短标签。 */
-          const strengthOf = (item) => {
-            // 以所在分组为准：待观察区里的条目，强度文本常写成「软（待观察，命中 1/3）」，
-            // 若先匹配「软」会把它错误标成软规则。
-            if (item?.section === 'hard') return { key: 'hard', label: '硬' }
-            if (item?.section === 'soft') return { key: 'soft', label: '软' }
-            if (item?.section === 'watch') return { key: 'watch', label: '待观察' }
-            const raw = String(item?.fields?.['强度'] ?? '')
-            if (raw.includes('待观察')) return { key: 'watch', label: '待观察' }
-            if (raw.includes('硬')) return { key: 'hard', label: '硬' }
-            if (raw.includes('软')) return { key: 'soft', label: '软' }
-            return { key: 'none', label: '—' }
-          }
-
-          const SECTIONS = [
-            { key: 'hard', label: '硬规则' },
-            { key: 'soft', label: '软规则' },
-            { key: 'watch', label: '待观察' },
-          ]
-          const FIELDS = ['规则', '证据', '来源', '强度', '反例']
-
-          /** 编号里的数字，用来排序（R-010 → 10）。 */
-          const ruleNumber = (item) => {
-            const number = Number(String(item.id ?? '').replace(/\D/g, ''))
-            return Number.isFinite(number) ? number : 0
-          }
-          const sortAsc = (list) => list.slice().sort((a, b) => ruleNumber(a) - ruleNumber(b))
-
-          function persist(nextItems) {
-            setBusy(true)
-            // 界面上倒排显示，写回文件时仍按编号正序，保持规则库本身可读
-            return api('/email/rules', { method: 'PUT', body: { items: sortAsc(nextItems) } }).then(
-              (data) => {
-                setItems(Array.isArray(data.items) ? data.items : nextItems)
-                setFlash('规则库已保存')
-              },
-              (error) => setFlash('保存失败：' + error.message),
-            ).finally(() => setBusy(false))
-          }
-
-          function startEdit(item) {
-            setEditing(item.id)
-            setDraft({ ...item, fields: { ...item.fields } })
-          }
-
-          function saveEdit() {
-            if (draft === null) return
-            const next = items.map((item) => (item.id === draft.id ? { ...draft, title: draft.title.trim(), fields: { ...draft.fields } } : item))
-            persist(next).then(() => { setEditing(null); setDraft(null) })
-          }
-
-          function addRule() {
-            const max = items.reduce((acc, item) => {
-              const number = Number(String(item.id).replace(/\D/g, ''))
-              return Number.isFinite(number) ? Math.max(acc, number) : acc
-            }, 0)
-            const item = {
-              id: 'R-' + String(max + 1).padStart(3, '0'),
-              title: '（新规则）',
-              section: 'watch',
-              fields: { 规则: '', 证据: '', 来源: '', 强度: '软（待观察，命中 0/3）', 反例: '' },
-            }
-            setItems(items.concat([item]))
-            startEdit(item)
-          }
-
-          function removeRule(item) {
-            if (!window.confirm('删除 ' + item.id + '「' + item.title + '」？')) return
-            persist(items.filter((entry) => entry.id !== item.id))
-          }
-
-          const sectionOf = (key) => (items ?? [])
-            .filter((item) => item.section === key)
-            .slice()
-            .sort((a, b) => ruleNumber(b) - ruleNumber(a))
-
-          return h(CardShell, {
-            t,
-            title: card.title,
-            state: card.status,
-            stateText: stats !== null ? String((stats.hard ?? 0) + (stats.soft ?? 0) + (stats.watch ?? 0)) : undefined,
-            actions: [
-              h('button', { key: 'draft', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'outline', onClick: () => insertPrompt('email-draft') }, t('email.draft')),
-              h('button', { key: 'add', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'outline', disabled: busy || items === null, onClick: addRule }, '新增规则'),
-            ],
-          },
-            card.error !== undefined ? h('div', { className: 'dsh-wb-error' }, card.error.message) : null,
-            stats !== null
-              ? h('div', { className: 'dsh-wb-filters' },
-                  ...[
-                    { key: 'all', label: '全部', count: (stats.hard ?? 0) + (stats.soft ?? 0) + (stats.watch ?? 0) },
-                    { key: 'hard', label: t('email.hard'), count: stats.hard ?? 0 },
-                    { key: 'soft', label: t('email.soft'), count: stats.soft ?? 0 },
-                    { key: 'watch', label: t('email.watch'), count: stats.watch ?? 0 },
-                    { key: 'absorbed', label: t('email.absorbed'), count: stats.absorbed ?? 0 },
-                  ].map((tab) => h('button', {
-                    key: tab.key,
-                    type: 'button',
-                    className: 'dsh-wb-filter',
-                    'data-active': filter === tab.key ? 'true' : 'false',
-                    onClick: () => setFilter(tab.key),
-                  }, h('span', null, tab.label), h('b', null, String(tab.count)))),
-                )
-              : null,
-            items === null ? h('p', { className: 'dsh-wb-note' }, '读取规则库…') : null,
-            items !== null && items.length === 0 ? h('p', { className: 'dsh-wb-note' }, '规则库是空的') : null,
-            filter === 'absorbed'
-              ? (drafts === null
-                  ? h('p', { className: 'dsh-wb-note', style: { marginTop: '12px' } }, '读取已吸收终稿…')
-                  : drafts.length === 0
-                    ? h('div', { className: 'dsh-wb-empty-block' },
-                        h('div', { className: 'dsh-wb-note' }, '规则库记着 ' + String(stats?.absorbed ?? 0) + ' 份已吸收终稿，但 examples/approved/ 里还没有文件。'),
-                        h('div', { className: 'dsh-wb-note' }, '把脱敏后的终稿放进那个目录（.md），这里就会列出来。'),
-                      )
-                    : h('div', { className: 'dsh-wb-section' },
-                        h('div', { className: 'dsh-wb-section-head' },
-                          h('span', { className: 'dsh-wb-section-name' }, '已吸收终稿'),
-                          h('span', { className: 'dsh-wb-section-count' }, String(drafts.length)),
-                        ),
-                        drafts.map((draft) => h('div', { key: draft.name, className: 'dsh-wb-draft' },
-                          h('button', {
-                            type: 'button', className: 'dsh-wb-draft-head',
-                            onClick: () => {
-                              if (openDraft !== null && openDraft.name === draft.name) { setOpenDraft(null); return }
-                              api('/email/draft?name=' + encodeURIComponent(draft.name)).then(
-                                (data) => setOpenDraft({ name: draft.name, text: data.text ?? '' }),
-                                (error) => setFlash('读取失败：' + error.message),
-                              )
-                            },
-                          },
-                            h('span', { className: 'dsh-wb-draft-title' }, draft.title),
-                            h('span', { className: 'dsh-wb-draft-meta' }, draft.chars + ' 字'),
-                          ),
-                          openDraft !== null && openDraft.name === draft.name
-                            ? h('div', { className: 'dsh-wb-md dsh-wb-draft-body' }, openDraft.text)
-                            : null,
-                        )),
-                      ))
-              : null,
-            ...SECTIONS.map((section) => {
-              if (filter !== 'all' && filter !== section.key) return null
-              const list = sectionOf(section.key)
-              if (list.length === 0) return null
-              return h('div', { key: section.key, className: 'dsh-wb-section' },
-                h('div', { className: 'dsh-wb-section-head' },
-                  h('span', { className: 'dsh-wb-section-name' }, section.label),
-                  h('span', { className: 'dsh-wb-section-count' }, String(list.length)),
-                ),
-                list.map((item) => (editing === item.id && draft !== null
-                  ? h('div', { key: item.id, className: 'dsh-wb-rule dsh-wb-rule-edit' },
-                      h('div', { className: 'dsh-wb-rule-head' },
-                        h('span', { className: 'dsh-wb-rule-id' }, item.id),
-                        h('span', { className: 'dsh-wb-rule-editlabel' }, '编辑中'),
-                      ),
-                      h('input', {
-                        className: 'dsh-wb-input', value: draft.title, placeholder: '规则标题',
-                        onChange: (event) => setDraft({ ...draft, title: event.target.value }),
-                      }),
-                      ...FIELDS.map((field) => h('div', { key: field, style: { marginTop: '8px' } },
-                        h('label', { className: 'dsh-wb-field-label' }, field),
-                        h('textarea', {
-                          className: 'dsh-wb-input dsh-wb-rule-field',
-                          value: draft.fields[field] ?? '',
-                          placeholder: field === '规则' ? '一句话写清「该怎么改」，不要写成「注意语气」' : '',
-                          onChange: (event) => setDraft({ ...draft, fields: { ...draft.fields, [field]: event.target.value } }),
-                        }),
-                      )),
-                      h('div', { className: 'dsh-wb-row-actions', style: { justifyContent: 'flex-end', marginTop: '10px' } },
-                        h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'outline', disabled: busy, onClick: () => { setEditing(null); setDraft(null) } }, '取消'),
-                        h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: saveEdit }, '保存'),
-                      ),
-                    )
-                  : h('div', { key: item.id, className: 'dsh-wb-rule', 'data-strength': strengthOf(item).key },
-                      h('div', { className: 'dsh-wb-rule-head' },
-                        h('span', { className: 'dsh-wb-rule-id' }, item.id),
-                        h('span', { className: 'dsh-wb-rule-title' }, item.title),
-                        h('span', {
-                          className: 'dsh-wb-strength',
-                          'data-tone': strengthOf(item).key,
-                          title: String(item.fields?.['强度'] ?? ''),
-                        }, strengthOf(item).label),
-                        h('span', { className: 'dsh-wb-rule-actions' },
-                          h('button', { type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', title: '编辑', 'aria-label': '编辑', onClick: () => startEdit(item) }, h(IconPencil, { size: 15 })),
-                          h('button', { type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', title: '删除', 'aria-label': '删除', onClick: () => removeRule(item) }, h(IconTrash, { size: 15 })),
-                        ),
-                      ),
-                      h('div', { className: 'dsh-wb-rule-body' }, item.fields?.['规则'] ?? ''),
-                      h('details', { className: 'dsh-wb-rule-more' },
-                        h('summary', null, '证据 · 来源 · 反例'),
-                        h('dl', { className: 'dsh-wb-kv' },
-                          h('dt', null, '证据'), h('dd', null, item.fields?.['证据'] || '—'),
-                          h('dt', null, '来源'), h('dd', null, item.fields?.['来源'] || '—'),
-                          h('dt', null, '反例'), h('dd', null, item.fields?.['反例'] || '—'),
-                        ),
-                      ),
-                    ))),
-              )
-            }),
-          )
-        }
-
-        /* ------------------------------------------------------------ 术语表 */
-
         const ENTRY_KINDS = {
           glossary: {
             api: '/glossary',
@@ -3649,27 +4112,7 @@ window.__ModuleLoader__.load({
           )
         }
 
-        /* ------------------------------------------------------------ 报销 */
-
-        function ReimburseCard({ card, t, insertPrompt }) {
-          const template = card.template ?? { status: 'unset', path: '' }
-          return h(CardShell, {
-            t,
-            title: card.title,
-            state: template.status,
-            stateText: t('state.' + (template.status ?? 'unset')),
-            actions: [
-              h('button', { key: 'insert', type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => insertPrompt('reimburse') }, t('reimburse.insert')),
-            ],
-          },
-            h('div', { className: 'dsh-wb-row-meta' }, t('reimburse.template') + '：' + (template.path !== '' ? template.path : '—')),
-            template.status === 'unset' || template.status === 'missing'
-              ? h('p', { className: 'dsh-wb-note' }, t('reimburse.missing') + '：在 cordis.patch.yml 里填 reimbursementTemplate，重启后生效。')
-              : null,
-          )
-        }
-
-        /* -------------------------------------------------------- prompt 卡 */
+        /* ---------------------------------------------------------- 提示词模板 */
 
         function PromptCard({ card, t, insertPrompt }) {
           const promptId = card.promptId ?? card.id
@@ -3683,7 +4126,7 @@ window.__ModuleLoader__.load({
             ],
           },
             card.error !== undefined ? h('div', { className: 'dsh-wb-error' }, card.error.message) : null,
-            h('p', { className: 'dsh-wb-note' }, 'promptId: ' + promptId),
+            h('p', { className: 'dsh-wb-note' }, '点「插入」把模板写进输入框，不会自动发送。'),
           )
         }
 

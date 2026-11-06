@@ -1,24 +1,20 @@
-# dsh-workbench：会话右侧栏工作台，事实源是 Obsidian vault 里的笔记。
+# dsh-cost-workbench：会话右侧栏的造价工作台，事实源是 Obsidian vault 里的笔记。
 # 本行插在 profile 的 bundle 层；用户可用自己的 patch 层按 id 覆盖 config（覆盖是整段替换）。
 - insert:
-    - id: dsh-workbench
-      name: 'dsh-legal-workbench'
+    - id: dsh-cost-workbench
+      name: 'dsh-cost-workbench'
       config:
-        # Obsidian vault 根目录与 SOP 子目录：工作台列/读/写这里的 md 笔记。
-        vaultRoot: ""          # 首次打开面板时会引导你填写
-        sopDir: "SOP"
-        # 工作台自己的笔记（术语表）放这里，Obsidian 里同样可见可改。
+        # Obsidian vault 根目录（建议专用的造价库）；首次打开面板时会引导填写。
+        vaultRoot: ""
+        # 资料库子目录：工作台列/读/写这里的 md 笔记（计价依据、招投标流程、合同范本、常用模板）。
+        sopDir: "00 资料库"
+        # 工作台自己的笔记（术语表、三张表）放这里，Obsidian 里同样可见可改。
         workbenchDir: "Workbench"
-        # cards.json / prompts.json 留在本机工作区（不是笔记）。
-        dataDir: ""            # 留空则用 ~/.dsh-workbench
-        # 邮件技能目录（rules 在 references/style-rules.md）。
-        emailSkillDir: ""      # 可选：填了你自己的邮件技能目录才会出现邮件卡
-        # 录音卡片：录音与转写稿落在 vault 的这个目录下。
-        recordingsDir: "Recordings"
+        # cards.json / prompts.json 留在本机工作区（不是笔记）。留空则用 ~/.dsh-workbench
+        dataDir: ""
+        # 会议记录：录音与转写稿落在 vault 的这个目录下。
+        recordingsDir: "会议记录"
         # ASR 凭据文件（火山引擎 apiKey 等），默认在 dataDir 下；600 权限，不进仓库。
         asrConfigFile: ""
-        # 报销模板：v1 只做存在性检查，留空即提示未配置。
-        reimbursementTemplate: ""
-        # 法宝积分：账户 MCP（0 积分/次）。token 留空时复用 profile 里 mcp-pkulaw-law 行的 Authorization。
-        pkulawAccountUrl: "https://apim-gateway.pkulaw.com/pkulaw-account/mcp"
-        pkulawToken: ""
+        # 打开 Obsidian / 外部网页用的命令；留空 = 按平台自动（Windows: cmd /c start）
+        openCommand: ""

@@ -1,35 +1,31 @@
 /**
- * dsh-workbench · Host 半边
+ * dsh-cost-workbench · Host 半边（造价工作台）
  *
  * 把工作台要的数据变成同源 HTTP JSON（`/api/dsh-workbench/*`）；浏览器端只渲染与交互。
  *
  * 唯一事实源是 Obsidian vault 里的 md 笔记：
- *   · SOP 卡直接列/读/写 `02 Work/01 工作SOP` 下的笔记，Obsidian 里改完保存，工作台下一次取数就是新内容；
- *   · 术语表落在 `02 Work/02 工作台/术语表.md`，两边改的是同一个文件；
+ *   · 资料库卡直接列/读/写 `00 资料库` 下的笔记，Obsidian 里改完保存，工作台下一次取数就是新内容；
+ *   · 术语表落在 `Workbench/术语表.md`，计价依据/材料价格/变更签证三张表落在 `Workbench/` 下；
  *   · cards.json / prompts.json 留在本机工作区（不是笔记，不该进 vault）。
  *
  * 路由族（全部 loopback-only，失败形状统一 {ok:false, code, message}）：
- *   GET  /overview            五张卡片的聚合状态（单卡异常写进自己的 error，不影响别的卡）
- *   GET  /cards               卡片清单（读 cards.json，坏则内置五卡 + warning）
+ *   GET  /overview            卡片聚合状态（单卡异常写进自己的 error，不影响别的卡）
+ *   GET  /cards               卡片清单（读 cards.json，坏则内置卡 + warning）
  *   GET  /prompts             prompt 模板
  *   GET  /sop[?q=|?note=]     笔记列表 / 全文搜索 / 单篇正文（含 sha1，供写回比对）
  *   POST /sop/refresh         清发现缓存重新列
  *   PUT  /sop/note            写回单篇（带 expectedSha1 冲突检查）
  *   POST /sop/note            新建笔记（同名拒绝）
- *   GET  /glossary?q=         术语条目
- *   POST /glossary            新增
- *   PUT  /glossary/:id        修改
- *   DELETE /glossary/:id      删除
- *   GET  /pkulaw              余额（60 秒缓存）
- *   POST /pkulaw/refresh      强制刷新余额
- *   GET  /email               邮件规则库统计
- *   GET  /email/rules         规则库全文（只读展示）
+ *   GET  /glossary?q=         术语条目（CRUD 同 /standards、/prices、/changes）
+ *   GET  /standards|/prices|/changes          造价三张表
+ *   POST /<table>、PUT/DELETE /<table>/:id    三张表的增改删
+ *   GET  /usage               用量角标（DeepSeek 余额 + 火山资源包）
  */
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { homedir } from 'node:os'
 
 import { readCards } from './lib/cards.js'
@@ -40,14 +36,12 @@ import {
   readGlossary,
   updateGlossaryEntry as updateGlossary,
 } from './lib/glossary.js'
+import { createCostTables, COST_TABLE_KINDS, entryMatches } from './lib/tables.js'
 import { createVaultStore } from './lib/vault.js'
 import { createRecordingStore } from './lib/recordings.js'
 import { createAsrBridge } from './lib/volc-asr.js'
 import { transcribeWithIflyrec } from './lib/iflyrec.js'
 import { createUsageReader } from './lib/usage.js'
-import { createPkulawReader } from './lib/pkulaw.js'
-import { readEmailStats } from './lib/email.js'
-import { parseRules, renderRules, applyItems, refreshCounts } from './lib/email-rules.js'
 
 /** 硬依赖：没有 web 服务器就没有路由可注册（非 Web 组合下本插件保持未激活，符合预期）。 */
 export const inject = ['webServer']
@@ -80,20 +74,16 @@ const MAX_BODY_BYTES = 1024 * 1024
 const DEFAULT_CONFIG = {
   // 全部留空或取中性值：安装后由首次引导写入 ~/.dsh-workbench/config.json
   vaultRoot: '',
-  sopDir: 'SOP',
+  sopDir: '00 资料库',
   workbenchDir: 'Workbench',
   dataDir: '',
-  emailSkillDir: '',
-  reimbursementTemplate: '',
-  pkulawAccountUrl: 'https://apim-gateway.pkulaw.com/pkulaw-account/mcp',
-  pkulawToken: '',
-  pkulawPatchFile: '',
   cardsFile: '',
   promptsFile: '',
   glossaryFile: '',
-  recordingsDir: 'Recordings',
+  recordingsDir: '会议记录',
   asrConfigFile: '',
-  openCommand: '/usr/bin/open',
+  // 留空 = 按平台自动选择（Windows: cmd /c start、macOS: open、Linux: xdg-open）
+  openCommand: '',
 }
 
 function resolveConfig(config, configFile = null) {
@@ -108,7 +98,7 @@ function resolveConfig(config, configFile = null) {
   }
   // 用户配置文件的优先级介于「默认值」与「profile 配置」之间
   if (configFile !== null && typeof configFile === 'object') {
-    for (const key of ['vaultRoot', 'dataDir', 'emailSkillDir', 'sopDir', 'workbenchDir', 'recordingsDir']) {
+    for (const key of ['vaultRoot', 'dataDir', 'sopDir', 'workbenchDir', 'recordingsDir']) {
       const value = typeof configFile[key] === 'string' ? configFile[key].trim() : ''
       if (value !== '' && (merged[key] === '' || merged[key] === DEFAULT_CONFIG[key] || key === 'vaultRoot')) merged[key] = value
     }
@@ -160,6 +150,35 @@ function writeError(res, status, code, message) {
 
 function describe(error) {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * 用系统默认程序打开一个 URI / 网页。
+ * Windows 没有 `/usr/bin/open`：走 `cmd /c start "" <target>`；macOS 用 open，Linux 用 xdg-open。
+ * openCommand 配了值就优先用配置的命令（跨平台自定义时用）。
+ */
+function openExternal(command, target) {
+  const custom = typeof command === 'string' ? command.trim() : ''
+  return new Promise((resolve, reject) => {
+    const done = (error) => {
+      if (error !== null) reject(Object.assign(new Error('打开失败：' + describe(error)), { code: 'open_failed' }))
+      else resolve()
+    }
+    try {
+      if (custom !== '') {
+        execFile(custom, [target], { timeout: 5000, windowsHide: true }, done)
+        return
+      }
+      if (process.platform === 'win32') {
+        execFile('cmd', ['/c', 'start', '', target], { timeout: 5000, windowsHide: true }, done)
+        return
+      }
+      execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { timeout: 5000 }, done)
+    } catch (error) {
+      // 某些受限环境里 execFile 会同步抛（如 EPERM）；统一成 open_failed 交给上层。
+      done(error)
+    }
+  })
 }
 
 async function readJsonBody(req) {
@@ -297,24 +316,6 @@ async function serveAudio(req, res, filePath) {
 }
 
 /** 路径存在性探测：缺文件是"卡片自己报错"的事，不抛。 */
-async function probePath(path) {
-  if (typeof path !== 'string' || path === '') return { path: path ?? '', status: 'unset' }
-  try {
-    const info = await stat(path)
-    return {
-      path,
-      status: 'ok',
-      kind: info.isDirectory() ? 'directory' : 'file',
-      size: info.isFile() ? info.size : undefined,
-      mtimeMs: Math.round(info.mtimeMs),
-    }
-  } catch (error) {
-    const code = error !== null && typeof error === 'object' ? error.code : undefined
-    if (code === 'ENOENT') return { path, status: 'missing' }
-    if (code === 'EPERM' || code === 'EACCES') return { path, status: 'denied' }
-    return { path, status: 'error', detail: describe(error) }
-  }
-}
 
 export function apply(ctx, config) {
   let settings = resolveConfig(config, loadUserConfigSync())
@@ -323,7 +324,7 @@ export function apply(ctx, config) {
     sopDir: settings.sopDir,
     backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
   })
-  const pkulaw = createPkulawReader({ getConfig: () => settings })
+  let costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
   let recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
 
   /** 给界面用的配置状态。 */
@@ -335,7 +336,6 @@ export function apply(ctx, config) {
       workbenchDir: settings.workbenchDir,
       recordingsDir: settings.recordingsDir,
       dataDir: settings.dataDir,
-      emailSkillDir: settings.emailSkillDir,
       configFile: USER_CONFIG_FILE,
     }
   }
@@ -348,6 +348,7 @@ export function apply(ctx, config) {
       sopDir: settings.sopDir,
       backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
     })
+    costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
     recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
   }
   /** ASR 会话的事件订阅者：sessionId → SSE 响应对象。 */
@@ -514,7 +515,7 @@ export function apply(ctx, config) {
       source: found.source,
       tree,
       vaultRoot: settings.vaultRoot,
-      vaultName: settings.vaultRoot.split('/').filter(Boolean).pop() ?? '',
+      vaultName: basename(settings.vaultRoot),
       sopDir: settings.sopDir,
       notes: found.notes,
       matches,
@@ -527,13 +528,13 @@ export function apply(ctx, config) {
     }
   }
 
-  /** 全局搜索：笔记正文 + 术语表 + 邮件规则库，混排并标注来源。 */
+  /** 全局搜索：笔记正文 + 术语表 + 造价三张表 + 录音，混排并标注来源。 */
   async function globalSearch(rawQuery) {
     const query = String(rawQuery ?? '').trim()
-    if (query === '') return { ok: true, query: '', hits: [], counts: { sop: 0, glossary: 0, email: 0 } }
+    if (query === '') return { ok: true, query: '', hits: [], counts: { sop: 0, glossary: 0, recording: 0, standards: 0, prices: 0, changes: 0 } }
     const lower = query.toLowerCase()
     const hits = []
-    const counts = { sop: 0, glossary: 0, email: 0, recording: 0 }
+    const counts = { sop: 0, glossary: 0, recording: 0, standards: 0, prices: 0, changes: 0 }
 
     for (const hit of await vault.search(query, { limit: 40 })) {
       hits.push({ source: 'sop', path: hit.path, title: hit.title, group: hit.group, line: hit.line, snippet: hit.snippet })
@@ -603,24 +604,33 @@ export function apply(ctx, config) {
       // 录音目录读不了不影响其它来源。
     }
 
-    try {
-      const rulesPath = join(settings.emailSkillDir, 'references', 'style-rules.md')
-      const lines = String(await readFile(rulesPath, 'utf8')).split(/\r?\n/)
-      for (let index = 0; index < lines.length; index += 1) {
-        if (!lines[index].toLowerCase().includes(lower)) continue
-        if (lines[index].trim() === '') continue
-        hits.push({ source: 'email', path: rulesPath, title: '邮件规则库', line: index + 1, snippet: lines[index].trim().slice(0, 220) })
-        counts.email += 1
+    // 造价三张表：计价依据 / 材料价格 / 变更签证（落盘在 Workbench/ 下的 md）
+    for (const kind of COST_TABLE_KINDS) {
+      const table = costTables[kind]
+      if (table === undefined) continue
+      try {
+        const current = await table.api.read(table.file)
+        for (const entry of current.entries) {
+          if (!entryMatches(entry, table.keys, lower)) continue
+          if (hits.length > 150) break
+          const title = [entry.name, entry.code, entry.project, entry.reason, entry.quote]
+            .find((part) => typeof part === 'string' && part.trim() !== '') ?? kind
+          const detail = [entry.category, entry.spec, entry.unit, entry.region, entry.version, entry.status, entry.note, entry.source]
+            .filter((part) => typeof part === 'string' && part.trim() !== '')
+            .join(' · ')
+          hits.push({ source: kind, id: entry.id, title, detail })
+          counts[kind] += 1
+        }
+      } catch {
+        // 单张表读不了不影响其它来源。
       }
-    } catch {
-      // 规则库读不到不影响这次搜索。
     }
 
     return { ok: true, query, hits, counts }
   }
 
   /** 卡片摘要：每个 kind 一个，异常只写进该卡片的 error。 */
-  async function cardSummary(card, cachedBalance) {
+  async function cardSummary(card) {
     switch (card.kind) {
       case 'sop': {
         const found = await vault.discover()
@@ -635,36 +645,18 @@ export function apply(ctx, config) {
           warning: found.source === 'spotlight' ? '目录枚举被系统挡住，笔记列表走 Spotlight' : undefined,
         }
       }
-      case 'pkulaw': {
-        if (cachedBalance !== null) {
-          return cachedBalance.ok === true
-            ? { status: cachedBalance.balance.stale === true ? 'stale' : 'ready', balance: cachedBalance.balance, warning: cachedBalance.warning }
-            : { status: 'error', error: { code: cachedBalance.code, message: cachedBalance.message } }
+      case 'standards':
+      case 'prices':
+      case 'changes': {
+        const table = costTables[card.kind]
+        if (table === undefined) {
+          return { status: 'error', error: { code: 'no_table', message: '没有这张表：' + card.kind } }
         }
-        return { status: 'idle', hint: '点刷新读取余额' }
-      }
-      case 'email': {
-        if (settings.emailSkillDir === '') {
-          return { status: 'idle', warning: '未配置邮件规则库（可选）。在配置里填 emailSkillDir 后出现。' }
-        }
-        const stats = await readEmailStats(settings.emailSkillDir)
-        if (stats.ok !== true) return { status: 'error', error: { code: stats.code, message: stats.message } }
-        // 「已吸收终稿数」以 examples/approved/ 的实际文件数为准：表里的数字只是记账，容易与文件脱节
-        let draftCount = 0
-        try {
-          const names = await readdir(join(settings.emailSkillDir, 'examples', 'approved'))
-          draftCount = names.filter((name) => name.toLowerCase().endsWith('.md') && name.toLowerCase() !== 'readme.md').length
-        } catch {
-          draftCount = 0
-        }
-        const claimed = Number(stats.absorbed ?? 0)
-        const drift = claimed !== draftCount
-          ? '规则库记着 ' + claimed + ' 份已吸收终稿，但 approved 目录里实际只有 ' + draftCount + ' 份文件'
-          : undefined
+        const current = await table.api.read(table.file)
         return {
           status: 'ready',
-          stats: { hard: stats.hard, soft: stats.soft, watch: stats.watch, absorbed: draftCount, claimedAbsorbed: claimed, lastMerge: stats.lastMerge, mtimeMs: stats.mtimeMs },
-          warning: drift ?? stats.inconsistency,
+          stats: { count: current.entries.length, exists: current.exists },
+          warning: current.warning,
         }
       }
       case 'glossary': {
@@ -675,10 +667,6 @@ export function apply(ctx, config) {
           warning: current.warning,
         }
       }
-      case 'reimburse': {
-        const probe = await probePath(settings.reimbursementTemplate)
-        return { status: probe.status === 'ok' ? 'ready' : 'idle', template: probe }
-      }
       case 'prompt': {
         const prompts = await readPrompts(settings.promptsFile)
         const promptId = card.promptId ?? card.id
@@ -688,8 +676,8 @@ export function apply(ctx, config) {
           : { status: 'ready', prompt: { promptId, title: prompt.title } }
       }
       default:
-        // 录音 / 搜索 / 查找 / 提示词这几类由界面自己渲染，服务端没有可汇总的东西
-        if (['recorder', 'search', 'find', 'prompt'].includes(card.kind)) return { status: 'ready' }
+        // 录音 / 搜索 / 查找 / 提示词 / 计算器这几类由界面自己渲染，服务端没有可汇总的东西
+        if (['recorder', 'search', 'find', 'prompt', 'calc'].includes(card.kind)) return { status: 'ready' }
         return { status: 'unsupported', hint: '暂不支持这个卡片类型：' + card.kind }
     }
   }
@@ -698,21 +686,20 @@ export function apply(ctx, config) {
     const cardsResult = await readCards(settings.cardsFile)
     const warnings = []
     if (cardsResult.warning !== undefined) warnings.push(cardsResult.warning)
-    const cachedBalance = pkulaw.peek()
 
     const cards = []
     for (const card of cardsResult.cards) {
       try {
-        cards.push({ ...card, ...(await cardSummary(card, cachedBalance)) })
+        cards.push({ ...card, ...(await cardSummary(card)) })
       } catch (error) {
         cards.push({ ...card, status: 'error', error: { code: 'card_failed', message: describe(error) } })
       }
     }
 
-    const vaultName = settings.vaultRoot.split('/').filter(Boolean).pop() ?? ''
+    const vaultName = basename(settings.vaultRoot)
     return {
       ok: true,
-      version: '0.3.0',
+      version: '1.0.0',
       generatedAt: new Date().toISOString(),
       source: cardsResult.source,
       warnings,
@@ -750,11 +737,10 @@ export function apply(ctx, config) {
           if (!isAbsolute) return writeError(res, 400, 'bad_request', '请填写绝对路径：macOS 以 / 开头，Windows 形如 D:\\文件夹')
           const next = {
             vaultRoot,
-            sopDir: typeof body.sopDir === 'string' && body.sopDir.trim() !== '' ? body.sopDir.trim() : 'SOP',
+            sopDir: typeof body.sopDir === 'string' && body.sopDir.trim() !== '' ? body.sopDir.trim() : '00 资料库',
             workbenchDir: typeof body.workbenchDir === 'string' && body.workbenchDir.trim() !== '' ? body.workbenchDir.trim() : 'Workbench',
-            recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : 'Recordings',
+            recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : '会议记录',
             dataDir: typeof body.dataDir === 'string' && body.dataDir.trim() !== '' ? body.dataDir.trim() : '',
-            emailSkillDir: typeof body.emailSkillDir === 'string' ? body.emailSkillDir.trim() : '',
           }
           await mkdir(join(homedir(), '.dsh-workbench'), { recursive: true })
           // 把该有的目录先建出来：用户不需要自己去 Finder 里新建
@@ -765,7 +751,7 @@ export function apply(ctx, config) {
               // 建不了（权限）不影响保存，界面会提示读不到
             }
           }
-          await writeFile(USER_CONFIG_FILE, JSON.stringify(next, null, 2) + '\n', 'utf8')
+          await writeFile(USER_CONFIG_FILE, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
           rebuild()
           return writeJson(res, 200, { ok: true, ...configStatus() })
         }
@@ -793,12 +779,7 @@ export function apply(ctx, config) {
         const body = await readJsonBody(req)
         if (typeof body.path !== 'string' || body.path === '') return writeError(res, 400, 'bad_request', '需要 path')
         const uri = vault.uriFor(body.path)
-        await new Promise((resolve, reject) => {
-          execFile(settings.openCommand, [uri], { timeout: 5000 }, (error) => {
-            if (error !== null) reject(Object.assign(new Error('唤起 Obsidian 失败：' + describe(error)), { code: 'open_failed' }))
-            else resolve()
-          })
-        })
+        await openExternal(settings.openCommand, uri)
         return writeJson(res, 200, { ok: true, uri })
       }
       // 打开外部控制台（只放行白名单域名，避免变成任意 URL 的执行器）
@@ -810,56 +791,8 @@ export function apply(ctx, config) {
         if (!ALLOWED.some((prefix) => target.startsWith(prefix))) {
           return writeError(res, 400, 'bad_request', '只允许打开火山的控制台页面')
         }
-        await new Promise((resolve, reject) => {
-          execFile(settings.openCommand, [target], { timeout: 5000 }, (error) => {
-            if (error !== null) reject(Object.assign(new Error('打开网页失败：' + describe(error)), { code: 'open_failed' }))
-            else resolve()
-          })
-        })
+        await openExternal(settings.openCommand, target)
         return writeJson(res, 200, { ok: true, url: target })
-      }
-
-      // 已批准终稿：列 examples/approved/ 下的 md（README 不算）
-      if (route === '/email/drafts') {
-        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        const dir = join(settings.emailSkillDir, 'examples', 'approved')
-        let names = []
-        try {
-          names = await readdir(dir)
-        } catch {
-          return writeJson(res, 200, { ok: true, count: 0, dir, items: [], missing: true })
-        }
-        const items = []
-        for (const name of names) {
-          if (!name.toLowerCase().endsWith('.md') || name.toLowerCase() === 'readme.md') continue
-          try {
-            const info = await stat(join(dir, name))
-            const text = await readFile(join(dir, name), 'utf8')
-            const title = (text.match(/^#\s+(.+)$/m) ?? [])[1] ?? name.replace(/\.md$/i, '')
-            items.push({ name, title: title.trim(), chars: text.replace(/\s/g, '').length, mtimeMs: info.mtimeMs })
-          } catch {
-            // 单份读不到就跳过
-          }
-        }
-        items.sort((left, right) => right.mtimeMs - left.mtimeMs)
-        return writeJson(res, 200, { ok: true, count: items.length, dir, items })
-      }
-
-      if (route === '/email/draft') {
-        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        const name = url.searchParams.get('name') ?? ''
-        if (!/^[^/\\]+\.md$/i.test(name) || name.includes('..')) return writeError(res, 400, 'bad_request', '文件名不合法')
-        const target = join(settings.emailSkillDir, 'examples', 'approved', name)
-        try {
-          return writeJson(res, 200, { ok: true, name, text: await readFile(target, 'utf8') })
-        } catch (error) {
-          return writeError(res, 404, 'missing_draft', '读不到这份终稿：' + describe(error))
-        }
-      }
-
-      if (route === '/email') {
-        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        return writeJson(res, 200, { ok: true, ...(await readEmailStats(settings.emailSkillDir)) })
       }
 
       /* ------------------------------------------------------------- SOP */
@@ -898,7 +831,7 @@ export function apply(ctx, config) {
         return writeError(res, 405, 'method_not_allowed', 'PUT or POST')
       }
 
-      /* -------------------------------------------------------- 法宝余额 */
+      /* ------------------------------------------------- 客户端日志 */
       if (route === '/client-log') {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
         const body = await readJsonBody(req)
@@ -916,74 +849,21 @@ export function apply(ctx, config) {
         return writeJson(res, 200, { ok: true })
       }
 
-      if (route === '/email/rules') {
-        const rulesPath = join(settings.emailSkillDir, 'references', 'style-rules.md')
-        if (method === 'GET') {
-          const text = await readFile(rulesPath, 'utf8')
-          const parsed = parseRules(text)
-          return writeJson(res, 200, { ok: true, path: rulesPath, items: parsed.items })
-        }
-        if (method === 'PUT') {
-          const body = await readJsonBody(req)
-          if (!Array.isArray(body.items)) return writeError(res, 400, 'bad_request', '需要 items 数组')
-          const text = await readFile(rulesPath, 'utf8')
-          const parsed = parseRules(text)
-          const allowed = new Set(['hard', 'soft', 'watch'])
-          const clean = body.items.map((item) => ({
-            id: String(item?.id ?? '').trim(),
-            title: String(item?.title ?? '').trim(),
-            section: allowed.has(item?.section) ? item.section : 'watch',
-            fields: {
-              规则: String(item?.fields?.规则 ?? '').trim(),
-              证据: String(item?.fields?.证据 ?? '').trim(),
-              来源: String(item?.fields?.来源 ?? '').trim(),
-              强度: String(item?.fields?.强度 ?? '').trim(),
-              反例: String(item?.fields?.反例 ?? '').trim(),
-            },
-          }))
-          for (const item of clean) {
-            if (!/^R-\d+$/.test(item.id)) return writeError(res, 400, 'bad_request', '规则编号必须形如 R-001：' + item.id)
-            if (item.title === '') return writeError(res, 400, 'bad_request', item.id + ' 缺少标题')
-            if (item.fields.规则 === '') return writeError(res, 400, 'bad_request', item.id + ' 缺少「规则」字段')
-          }
-          // 写前备份：不放技能目录，统一放数据目录的 .backups
-          const backupDir = join(settings.dataDir, '.backups')
-          await mkdir(backupDir, { recursive: true })
-          await writeFile(join(backupDir, 'email-rules-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md'), text, 'utf8')
-          applyItems(parsed, clean)
-          refreshCounts(parsed, clean)
-          const next = renderRules(parsed)
-          await writeFile(rulesPath, next, 'utf8')
-          return writeJson(res, 200, { ok: true, items: clean })
-        }
-        return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
-      }
-
       if (route === '/usage') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
         const force = url.searchParams.get('refresh') === '1'
         return writeJson(res, 200, { ok: true, ...(await usageReader.get(force)) })
       }
 
-      if (route === '/pkulaw') {
-        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        const result = await pkulaw.get()
-        if (result.ok !== true) return writeJson(res, 502, { ok: false, code: result.code, message: result.message })
-        return writeJson(res, 200, { ok: true, ...result })
-      }
-      if (route === '/pkulaw/refresh') {
-        if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
-        const result = await pkulaw.get({ force: true })
-        if (result.ok !== true) return writeJson(res, 502, { ok: false, code: result.code, message: result.message })
-        return writeJson(res, 200, { ok: true, ...result })
-      }
-
-      /* -------------------------------------------------- 术语表 / 句式库 */
+      /* -------------------------------------------------- 术语表 / 造价三表 */
       const entryTables = {
         '/glossary': {
           file: settings.glossaryFile,
           api: { read: readGlossary, add: addGlossary, update: updateGlossary, remove: deleteGlossary, keys: ['zh', 'en', 'field', 'tag', 'note'] },
         },
+        '/standards': { file: costTables.standards.file, api: costTables.standards.api },
+        '/prices': { file: costTables.prices.file, api: costTables.prices.api },
+        '/changes': { file: costTables.changes.file, api: costTables.changes.api },
       }
       for (const [base, config] of Object.entries(entryTables)) {
         if (route === base || route.startsWith(base + '/')) {

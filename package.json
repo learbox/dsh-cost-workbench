@@ -1,8 +1,8 @@
 {
-  "name": "dsh-legal-workbench",
-  "version": "1.1.1",
+  "name": "dsh-cost-workbench",
+  "version": "1.0.0",
   "type": "module",
-  "description": "Right-sidebar workbench for DeepSeek Harness: read/write your Obsidian notes, SOP lookup, glossary, recordings with live transcription and annotations, global search, optional usage badges.",
+  "description": "Right-sidebar cost-estimation workbench for DeepSeek Harness (Windows-friendly fork of dsh-legal-workbench): Obsidian note library, pricing basis, material prices, variation ledger, cost calculator, glossary, meeting recordings with live transcription, global search, and a cost/lite mode switch.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -16,6 +16,7 @@
     "lib/**/*.js",
     "locale/*.json",
     "icon.svg",
+    "scripts/**",
     "README.md",
     "README.zh.md",
     "PRIVACY.md",
@@ -39,21 +40,15 @@
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "legal",
+    "cost-estimation",
+    "quantity-surveying",
+    "tendering",
     "obsidian",
     "transcription",
-    "workbench",
-    "lawfirm"
+    "workbench"
   ],
   "engines": {
-    "dsh": ">=0.2.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/gaog88666-boop/dsh-legal-workbench.git"
-  },
-  "homepage": "https://github.com/gaog88666-boop/dsh-legal-workbench#readme",
-  "bugs": {
-    "url": "https://github.com/gaog88666-boop/dsh-legal-workbench/issues"
+    "dsh": ">=0.2.0",
+    "node": ">=20"
   }
 }

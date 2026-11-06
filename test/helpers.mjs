@@ -12,7 +12,7 @@ import { join } from 'node:path'
 /** 真实 vault（只读测试用）；不存在时调用方应跳过相关断言。 */
 // 真实 vault 只在本地联调时用：设置 WORKBENCH_REAL_VAULT 环境变量，默认不启用
 export const REAL_VAULT = process.env.WORKBENCH_REAL_VAULT ?? ''
-export const REAL_SOP = '02 Work/01 工作SOP'
+export const REAL_SOP = '00 资料库'
 
 /**
  * 挂载一个插件实例，返回能直接打路由的函数。

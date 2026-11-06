@@ -63,7 +63,7 @@ vm.createContext(sandbox)
 vm.runInContext(source, sandbox)
 
 check('__ModuleLoader__.load 被调用', loaded !== null)
-check('模块 id 正确', loaded.id === 'dsh-legal-workbench', loaded.id)
+check('模块 id 正确', loaded.id === 'dsh-cost-workbench', loaded.id)
 
 const plugin = loaded.factory((name) => {
   if (name === 'react') return React
@@ -71,6 +71,23 @@ const plugin = loaded.factory((name) => {
 })
 check('factory 返回 apply', typeof plugin.apply === 'function')
 check('inject 声明存在', Array.isArray(plugin.inject) && plugin.inject.includes('slots'))
+
+/* 造价计算器：公式必须能被测试直接断言（WB_CALC 从 factory 暴露为 _calc）。 */
+const calc = plugin._calc
+check('WB_CALC 已暴露', calc !== undefined && typeof calc.rebarWeight === 'function')
+if (calc !== undefined) {
+  check('钢筋理论重量 d20 ≈ 2.468 kg/m', Math.abs(calc.rebarWeight(20) - 2.468) < 0.001, calc.rebarWeight(20))
+  const unit = calc.unitPrice({ labor: 100, material: 200, machine: 50, overheadRate: 10, profitRate: 5, fee: 20, taxRate: 9 })
+  check('综合单价组价 ≈ 462.43', Math.abs(unit - 462.4325) < 0.01, unit)
+  const total = calc.totalCost({ direct: 1000, measures: 100, other: 50, fee: 30, taxRate: 9 })
+  check('总造价 ≈ 1286.2', Math.abs(total - 1286.2) < 0.01, total)
+  check('单位造价 = 1286.2 元/m²', Math.abs(calc.costPerArea(1286200, 1000) - 1286.2) < 0.01, calc.costPerArea(1286200, 1000))
+  check('含钢量 = 10 kg/m²', Math.abs(calc.steelPerArea(10000, 1000) - 10) < 0.001, calc.steelPerArea(10000, 1000))
+  check('1 m³ = 1000 L', Math.abs(calc.convert(1, 'm3', 'l') - 1000) < 1e-9, calc.convert(1, 'm3', 'l'))
+  check('1 t = 1000 kg', Math.abs(calc.convert(1, 't', 'kg') - 1000) < 1e-9, calc.convert(1, 't', 'kg'))
+  check('非法数字返回 NaN', Number.isNaN(calc.rebarWeight('abc')) && Number.isNaN(calc.unitPrice({ labor: 'x' })))
+  check('跨维度换算返回 NaN', Number.isNaN(calc.convert(1, 'm3', 't')))
+}
 
 const registered = []
 const ctx = {

@@ -2,7 +2,7 @@
  * 一键回归：依次跑三个测试文件，任何一个失败即整体失败。
  *
  * 用法：
- *   node test/all.mjs                  # 离线（跳过法宝联网）
+ *   node test/all.mjs                  # 离线（不联网）
  *   WB_TEST_NETWORK=1 node test/all.mjs
  */
 import { spawn } from 'node:child_process'

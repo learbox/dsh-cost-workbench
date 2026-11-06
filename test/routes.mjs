@@ -2,10 +2,10 @@
  * 路由端到端：用假 webServer 直接打 HTTP handler，不启动 App。
  *
  * 两组：
- *   ① 只读组——打真实 vault（不存在则跳过），验证 overview / 树 / 单篇 / 搜索 / 邮件 / 卡片；
- *   ② 写入组——全部落在临时目录，验证指纹冲突、备份位置、新建、越界拦截、术语 CRUD、深链。
+ *   ① 只读组——打真实 vault（不存在则跳过），验证 overview / 树 / 单篇 / 搜索 / 卡片；
+ *   ② 写入组——全部落在临时目录，验证指纹冲突、备份位置、新建、越界拦截、术语与三张表 CRUD、深链。
  *
- * 法宝余额会走真实网络（0 积分/次），默认跳过；要跑加 WB_TEST_NETWORK=1。
+ * 用量角标会走真实网络，默认跳过；要跑加 WB_TEST_NETWORK=1。
  */
 import assert from 'node:assert/strict'
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
@@ -48,7 +48,7 @@ if (await exists(join(REAL_VAULT, REAL_SOP))) {
 
   const search = await call('GET', '/search?q=' + encodeURIComponent('的'))
   check('全局搜索有命中', search.status === 200 && search.json.hits.length > 0, search.json?.hits?.length)
-  check('搜索命中带来源', search.json.hits.every((hit) => ['sop', 'glossary', 'email', 'recording'].includes(hit.source)))
+  check('搜索命中带来源', search.json.hits.every((hit) => ['sop', 'glossary', 'recording', 'standards', 'prices', 'changes'].includes(hit.source)))
 
   const emptySearch = await call('GET', '/search?q=')
   check('空搜索返回空', emptySearch.json.hits.length === 0)
@@ -61,18 +61,15 @@ if (await exists(join(REAL_VAULT, REAL_SOP))) {
   const glossary = await call('GET', '/glossary')
   check('/glossary 200', glossary.status === 200 && Array.isArray(glossary.json.entries))
 
-  const email = await call('GET', '/email')
-  check('/email 200', email.status === 200)
+  const standards = await call('GET', '/standards')
+  check('/standards 200', standards.status === 200 && Array.isArray(standards.json.entries))
+  const prices = await call('GET', '/prices')
+  check('/prices 200', prices.status === 200 && Array.isArray(prices.json.entries))
+  const changes = await call('GET', '/changes')
+  check('/changes 200', changes.status === 200 && Array.isArray(changes.json.entries))
 
   check('未知路由 404', (await call('GET', '/nope')).status === 404)
   check('错误方法 405', (await call('DELETE', '/overview')).status === 405)
-
-  if (process.env.WB_TEST_NETWORK === '1') {
-    const balance = await call('GET', '/pkulaw')
-    check('法宝余额可取（联网）', balance.status === 200 && Number.isFinite(balance.json.balance.availablePoints), balance.raw.slice(0, 120))
-  } else {
-    console.log('  · 跳过法宝联网测试（WB_TEST_NETWORK=1 可开）')
-  }
 } else {
   console.log('  · 跳过真实 vault 只读测试（' + join(REAL_VAULT, REAL_SOP) + ' 不存在）')
 }
@@ -82,59 +79,78 @@ if (await exists(join(REAL_VAULT, REAL_SOP))) {
 const tmp = await tempDir()
 try {
   const vaultRoot = join(tmp.dir, 'vault')
-  await mkdir(join(vaultRoot, 'SOP', 'Stage I'), { recursive: true })
-  await writeFile(join(vaultRoot, 'SOP', '甲.md'), '# 甲\n原文\n', 'utf8')
+  const siteDir = '00 资料库'
+  await mkdir(join(vaultRoot, siteDir, '阶段一'), { recursive: true })
+  await writeFile(join(vaultRoot, siteDir, '甲.md'), '# 甲\n原文\n', 'utf8')
   const glossaryFile = join(tmp.dir, '术语表.md')
   const dataDir = join(tmp.dir, 'data')
   await mkdir(dataDir, { recursive: true })
-  await writeFile(join(dataDir, 'cards.json'), JSON.stringify({ cards: [{ id: 'sop', kind: 'sop', title: 'SOP', order: 10 }] }), 'utf8')
+  await writeFile(join(dataDir, 'cards.json'), JSON.stringify({ cards: [{ id: 'sop', kind: 'sop', title: '资料库', order: 10 }] }), 'utf8')
   await writeFile(join(dataDir, 'prompts.json'), JSON.stringify({ prompts: {} }), 'utf8')
-
-  // 邮件规则库：用临时技能目录，绝不能碰真实的 style-rules.md
-  const skillDir = join(tmp.dir, 'skill')
-  await mkdir(join(skillDir, 'references'), { recursive: true })
-  const rulesSource = ['# 规则库', '', '## 计数', '', '| 指标 | 值 |', '|---|---|', '| 硬规则数 | 0 |', '| 软规则数 | 0 |', '| 待观察（已批准，命中 <3 次） | 0 |', '', '## 待观察（已批准，命中 <3 次，同样遵守）', '', '（空）', ''].join('\n')
-  await writeFile(join(skillDir, 'references', 'style-rules.md'), rulesSource, 'utf8')
 
   const call = await mount({
     vaultRoot,
-    sopDir: 'SOP',
+    sopDir: siteDir,
     workbenchDir: 'Workbench',
-    recordingsDir: 'Recordings',
+    recordingsDir: '会议记录',
     dataDir,
     glossaryFile,
-    emailSkillDir: skillDir,
-    openCommand: '/bin/echo',
+    // 故意给一个不存在的打开命令：验证 open_failed 分支，同时避免测试真的去拉起 Obsidian。
+    openCommand: '__missing_open_command__',
   })
 
-  const current = await call('GET', '/sop?note=' + encodeURIComponent('SOP/甲.md'))
+  const current = await call('GET', '/sop?note=' + encodeURIComponent('00 资料库/甲.md'))
   check('临时 vault 读到正文', current.status === 200 && current.json.note.text.includes('原文'))
 
-  const conflict = await call('PUT', '/sop/note', { path: 'SOP/甲.md', text: 'x', expectedSha1: 'deadbeef' })
+  const conflict = await call('PUT', '/sop/note', { path: '00 资料库/甲.md', text: 'x', expectedSha1: 'deadbeef' })
   check('指纹不符 409', conflict.status === 409 && conflict.json.code === 'conflict')
 
   const saved = await call('PUT', '/sop/note', {
-    path: 'SOP/甲.md',
+    path: '00 资料库/甲.md',
     text: '# 甲\n改后\n',
     expectedSha1: current.json.note.sha1,
   })
   check('指纹正确写入', saved.status === 200, saved.raw.slice(0, 120))
-  check('磁盘内容已变', (await readFile(join(vaultRoot, 'SOP', '甲.md'), 'utf8')).includes('改后'))
-  check('备份落到隐藏目录', (await readFile(join(vaultRoot, 'Workbench/.backups/SOP__甲.md.bak'), 'utf8')).includes('原文'))
+  check('磁盘内容已变', (await readFile(join(vaultRoot, '00 资料库', '甲.md'), 'utf8')).includes('改后'))
+  check('备份落到隐藏目录', (await readFile(join(vaultRoot, 'Workbench/.backups/00 资料库__甲.md.bak'), 'utf8')).includes('原文'))
 
-  const created = await call('POST', '/sop/note', { path: 'SOP/Stage I/乙.md', text: '# 乙\n' })
-  check('新建笔记', created.status === 200 && created.json.note.path === 'SOP/Stage I/乙.md')
-  check('同名新建 409', (await call('POST', '/sop/note', { path: 'SOP/Stage I/乙.md', text: 'x' })).status === 409)
+  const created = await call('POST', '/sop/note', { path: '00 资料库/阶段一/乙.md', text: '# 乙\n' })
+  check('新建笔记', created.status === 200 && created.json.note.path === '00 资料库/阶段一/乙.md')
+  check('同名新建 409', (await call('POST', '/sop/note', { path: '00 资料库/阶段一/乙.md', text: 'x' })).status === 409)
   check('越界 400', (await call('PUT', '/sop/note', { path: '../x.md', text: 'x' })).status === 400)
-  check('缺字段 400', (await call('PUT', '/sop/note', { path: 'SOP/甲.md' })).status === 400)
+  check('缺字段 400', (await call('PUT', '/sop/note', { path: '00 资料库/甲.md' })).status === 400)
 
-  const added = await call('POST', '/glossary', { zh: '差额补足', en: 'Shortfall Undertaking', field: '增信' })
+  const added = await call('POST', '/glossary', { zh: '工程量清单', en: 'Bill of Quantities', field: '造价' })
   check('术语新增', added.status === 200 && added.json.total === 1, added.raw.slice(0, 120))
-  check('术语重复 400', (await call('POST', '/glossary', { zh: '差额补足', en: 'Shortfall Undertaking' })).status === 400)
-  const updated = await call('PUT', '/glossary/' + added.json.entry.id, { zh: '差额补足', en: 'Shortfall Undertaking Agreement' })
+  check('术语重复 400', (await call('POST', '/glossary', { zh: '工程量清单', en: 'Bill of Quantities' })).status === 400)
+  const updated = await call('PUT', '/glossary/' + added.json.entry.id, { zh: '工程量清单', en: 'Bill of Quantities (BOQ)' })
   check('术语修改', updated.status === 200)
   check('术语删除', (await call('DELETE', '/glossary/' + updated.json.entry.id)).status === 200)
   check('术语删不存在 404', (await call('DELETE', '/glossary/deadbeef0000')).status === 404)
+
+  /* ------------------------------------------------ 造价三表（临时 vault） */
+  const stdAdded = await call('POST', '/standards', { code: 'GB50500', name: '建设工程工程量清单计价规范', category: '计价规范', version: 'GB 50500-2013', date: '2013-07-01', note: '' })
+  check('计价依据新增 200', stdAdded.status === 200 && stdAdded.json.total === 1, stdAdded.raw.slice(0, 160))
+  check('计价依据重复 400', (await call('POST', '/standards', { code: 'GB50500', name: 'x' })).status === 400)
+  const stdList = await call('GET', '/standards')
+  check('计价依据列表命中落盘文件', stdList.json.entries.some((entry) => entry.code === 'GB50500'), stdList.raw.slice(0, 160))
+  const stdUpdated = await call('PUT', '/standards/' + stdAdded.json.entry.id, { code: 'GB50500', name: '建设工程工程量清单计价规范', category: '计价规范', version: 'GB 50500-2013（含 2018 修订）', date: '2013-07-01', note: '' })
+  check('计价依据修改 200', stdUpdated.status === 200)
+  check('计价依据落盘可见', (await readFile(join(vaultRoot, 'Workbench', '计价依据.md'), 'utf8')).includes('2018 修订'))
+
+  const priceAdded = await call('POST', '/prices', { name: '螺纹钢', spec: 'HRB400E φ20', unit: 't', price: '3950', region: '杭州', date: '2026-10-01', source: '信息价' })
+  check('材料价格新增 200', priceAdded.status === 200)
+  const priceDub = await call('POST', '/prices', { name: '螺纹钢', spec: 'HRB400E φ20', unit: 't', region: '杭州' })
+  check('材料价格同主键 400', priceDub.status === 400)
+
+  const changeAdded = await call('POST', '/changes', { code: 'BG-001', project: '示例项目', reason: '增加抗浮锚杆', amount: '120000', date: '2026-10-20', status: '待审批' })
+  check('变更签证新增 200', changeAdded.status === 200)
+  check('变更签证删除 200', (await call('DELETE', '/changes/' + changeAdded.json.entry.id)).status === 200)
+
+  const stdSearch = await call('GET', '/search?q=' + encodeURIComponent('GB50500'))
+  check('搜索命中计价依据', stdSearch.json.hits.some((hit) => hit.source === 'standards'), JSON.stringify(stdSearch.json.counts))
+  const priceSearch = await call('GET', '/search?q=' + encodeURIComponent('螺纹钢'))
+  check('搜索命中材料价格', priceSearch.json.hits.some((hit) => hit.source === 'prices'), JSON.stringify(priceSearch.json.counts))
 
 
 
@@ -205,7 +221,7 @@ try {
   const readAnn = await call('GET', '/recordings/' + encodeURIComponent(recId) + '/annotations')
   check('批注读回', readAnn.json.annotations[0]?.note === '我的批注')
   check('批注定位到行', readAnn.json.annotations[0]?.stale === false)
-  check('转写稿追加批注附录', (await readFile(join(vaultRoot, 'Recordings', recId, '转写.md'), 'utf8')).includes('## 批注'))
+  check('转写稿追加批注附录', (await readFile(join(vaultRoot, '会议记录', recId, '转写.md'), 'utf8')).includes('## 批注'))
 
   const recSearch = await call('GET', '/search?q=' + encodeURIComponent('测试'))
   check('搜索命中录音转写', recSearch.json.hits.some((hit) => hit.source === 'recording'), JSON.stringify(recSearch.json.counts))
@@ -224,26 +240,11 @@ try {
   check('删除录音 200', removed.status === 200, removed.raw.slice(0, 120))
   const afterDelete = await call('GET', '/recordings')
   check('删除后不在列表', !afterDelete.json.items.some((item) => item.id === finalId))
-  check('删除后可回收（.trash）', await readFile(join(vaultRoot, 'Recordings', '.trash', finalId, 'audio.wav')).then(() => true, () => false))
+  check('删除后可回收（.trash）', await readFile(join(vaultRoot, '会议记录', '.trash', finalId, 'audio.wav')).then(() => true, () => false))
 
-  const open = await call('POST', '/open-obsidian', { path: 'SOP/甲.md' })
-  check('深链由 Host 拼装', open.status === 200 && open.json.uri.startsWith('obsidian://open?vault=vault&file=SOP/'), open.json?.uri)
+  const open = await call('POST', '/open-obsidian', { path: '00 资料库/甲.md' })
+  check('深链打开命令缺失时报 open_failed', open.status === 500 && open.json.code === 'open_failed', open.raw.slice(0, 160))
   check('深链越界 400', (await call('POST', '/open-obsidian', { path: '../../etc/passwd' })).status === 400)
-  const rulesRead = await call('GET', '/email/rules')
-  check('规则库可读', rulesRead.status === 200 && Array.isArray(rulesRead.json.items), rulesRead.raw.slice(0, 120))
-
-  const rulesPut = await call('PUT', '/email/rules', {
-    items: [{ id: 'R-900', title: '测试规则', section: 'watch', fields: { 规则: '测试内容', 证据: '', 来源: '测试', 强度: '软', 反例: '' } }],
-  })
-  check('规则库可写', rulesPut.status === 200, rulesPut.raw.slice(0, 160))
-  const rulesAfter = await call('GET', '/email/rules')
-  check('写入后能读回', rulesAfter.json.items.some((item) => item.id === 'R-900' && item.fields['规则'] === '测试内容'))
-  {
-    const backups = await readdir(join(dataDir, '.backups')).catch(() => [])
-    check('写前有备份', backups.some((name) => name.startsWith('email-rules-')), backups.join(','))
-  }
-  const badRule = await call('PUT', '/email/rules', { items: [{ id: 'X-1', title: 't', section: 'watch', fields: { 规则: 'r' } }] })
-  check('非法编号被拒', badRule.status === 400, badRule.raw.slice(0, 120))
 
 } finally {
   await tmp.cleanup()

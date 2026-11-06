@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Legal Workbench",
-    "description": "A legal-practice workbench in the right sidebar: notes and SOPs, recordings with live transcription and annotations, glossary, global search; optional email rules library and usage badges."
+    "title": "Cost Workbench",
+    "description": "A cost-estimation and tendering workbench in the right sidebar: document library and templates, pricing basis, material prices, variation ledger, cost calculator, glossary, meeting recordings with transcription, global search, and a cost/lite mode switch."
   }
 }
