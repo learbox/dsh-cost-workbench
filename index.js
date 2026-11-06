@@ -23,10 +23,11 @@
  */
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 
 import { readCards } from './lib/cards.js'
 import { readPrompts } from './lib/prompts.js'
@@ -264,38 +265,58 @@ async function handleEntryTable({ req, res, url, method, route, base, file, api 
  */
 function pickFolder(command, timeoutMs = 300000) {
   const custom = typeof command === 'string' ? command.trim() : ''
+  // 用临时文件回传结果：PowerShell 5.1 的 stdout 是控制台代码页（GBK），
+  // 直接按 UTF-8 解码会把中文路径变成乱码；写 UTF-8 文件再读，跟控制台编码无关。
+  const outFile = join(tmpdir(), 'dsh-cost-workbench-pick-' + randomUUID() + '.txt')
   const WIN_SCRIPT = [
     'Add-Type -AssemblyName System.Windows.Forms',
     '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
     "$d.Description = '选择造价工作台的 Obsidian 库目录'",
     '$d.ShowNewFolderButton = $true',
-    'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }',
+    'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [System.IO.File]::WriteAllText($env:DSH_PICK_OUT, $d.SelectedPath, (New-Object System.Text.UTF8Encoding($false))) }',
   ].join('; ')
   return new Promise((resolve, reject) => {
-    const done = (error, stdout) => {
+    const options = { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, env: { ...process.env, DSH_PICK_OUT: outFile } }
+    const finish = async (error, stdout) => {
+      let picked = ''
+      try {
+        picked = String(await readFile(outFile, 'utf8')).trim()
+      } catch {
+        picked = ''
+      }
+      try {
+        await rm(outFile, { force: true })
+      } catch {
+        // 临时文件可能根本没创建
+      }
+      if (picked !== '') {
+        resolve(picked)
+        return
+      }
       if (error !== null && error !== undefined) {
         reject(Object.assign(new Error('打开文件夹选择器失败：' + describe(error)), { code: 'picker_failed' }))
         return
       }
+      // 自定义命令没写临时文件时，退回 stdout（编码由该命令自己负责）
       const lines = String(stdout ?? '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
       resolve(lines.length === 0 ? '' : lines[lines.length - 1])
     }
     try {
       if (custom !== '') {
-        execFile(custom, [], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 }, done)
+        execFile(custom, [], options, (error, stdout) => { void finish(error, stdout) })
         return
       }
       if (process.platform === 'win32') {
-        execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', WIN_SCRIPT], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 }, done)
+        execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', WIN_SCRIPT], options, (error, stdout) => { void finish(error, stdout) })
         return
       }
       if (process.platform === 'darwin') {
-        execFile('osascript', ['-e', 'POSIX path of (choose folder with prompt "选择造价工作台的 Obsidian 库目录")'], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, done)
+        execFile('osascript', ['-e', 'POSIX path of (choose folder with prompt "选择造价工作台的 Obsidian 库目录")'], options, (error, stdout) => { void finish(error, stdout) })
         return
       }
-      execFile('zenity', ['--file-selection', '--directory', '--title=选择造价工作台的 Obsidian 库目录'], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, done)
+      execFile('zenity', ['--file-selection', '--directory', '--title=选择造价工作台的 Obsidian 库目录'], options, (error, stdout) => { void finish(error, stdout) })
     } catch (error) {
-      done(error)
+      void finish(error, '')
     }
   })
 }
