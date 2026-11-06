@@ -2985,7 +2985,7 @@ function CalcCard({ t }) {
               if (node.count > 0) {
                 folders.push({
                   label: '\u3000'.repeat(depth) + node.name,
-                  value: sopBase === '' ? node.path : sopBase + '/' + node.path,
+                  value: sopBase === '' || String(node.path).startsWith('@public') ? node.path : sopBase + '/' + node.path,
                   depth,
                 })
               }

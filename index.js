@@ -712,8 +712,34 @@ export function apply(ctx, config) {
     backupDir: stores.backupDir,
     vaultName: stores.project === '' ? settings.obsidianVaultName : '',
   })
+  let publicVault = createVaultStore({
+    vaultRoot: settings.vaultRoot,
+    sopDir: settings.sopDir,
+    backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+    vaultName: settings.obsidianVaultName,
+  })
   let costTables = createCostTables({ workbenchDir: stores.workbenchDir })
   let recordings = createRecordingStore({ root: stores.recordingsRoot })
+
+  /** 公共资料库的笔记在合并树里用这个前缀标识来源；项目笔记不带前缀。 */
+  const PUBLIC_PREFIX = '@public/'
+  function splitSource(relPath) {
+    const text = String(relPath ?? '')
+    return text.startsWith(PUBLIC_PREFIX)
+      ? { source: 'public', rel: text.slice(PUBLIC_PREFIX.length) }
+      : { source: 'project', rel: text }
+  }
+  function vaultForSource(source) {
+    return source === 'public' ? publicVault : vault
+  }
+  function withSource(source, relPath) {
+    return source === 'public' ? PUBLIC_PREFIX + relPath : relPath
+  }
+  function prefixTree(nodes, prefix) {
+    return (Array.isArray(nodes) ? nodes : []).map((node) => node.type === 'dir'
+      ? { ...node, path: prefix + node.path, children: prefixTree(node.children, prefix) }
+      : { ...node, path: prefix + node.path })
+  }
 
   /** 给界面用的配置状态。 */
   function configStatus() {
@@ -741,6 +767,12 @@ export function apply(ctx, config) {
       sopDir: stores.sopDir,
       backupDir: stores.backupDir,
       vaultName: stores.project === '' ? settings.obsidianVaultName : '',
+    })
+    publicVault = createVaultStore({
+      vaultRoot: settings.vaultRoot,
+      sopDir: settings.sopDir,
+      backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+      vaultName: settings.obsidianVaultName,
     })
     costTables = createCostTables({ workbenchDir: stores.workbenchDir })
     recordings = createRecordingStore({ root: stores.recordingsRoot })
@@ -902,21 +934,43 @@ export function apply(ctx, config) {
 
   async function sopListing(query) {
     const found = await vault.discover()
-    const matches = query === '' ? [] : await vault.search(query)
+    const publicFound = await publicVault.discover()
+    const projectMatches = query === '' ? [] : await vault.search(query)
+    const publicMatches = query === '' ? [] : await publicVault.search(query)
     const tree = query === '' ? await vault.tree() : null
+    const notes = [
+      ...found.notes,
+      ...publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path })),
+    ]
+    const mergedTree = query === ''
+      ? [
+          ...(tree ?? []),
+          {
+            type: 'dir',
+            name: '公共资料库',
+            path: PUBLIC_PREFIX.slice(0, -1),
+            children: prefixTree(await publicVault.tree(), PUBLIC_PREFIX),
+            count: publicFound.notes.length,
+          },
+        ]
+      : null
+    const matches = [
+      ...projectMatches,
+      ...publicMatches.map((match) => ({ ...match, path: PUBLIC_PREFIX + match.path })),
+    ]
     return {
       ok: true,
       source: found.source,
-      tree,
+      tree: mergedTree,
       vaultRoot: stores.projectRoot,
       vaultName: basename(stores.projectRoot),
       sopDir: stores.sopDir,
-      notes: found.notes,
+      notes,
       matches,
       stats: {
-        count: found.notes.length,
-        chars: found.notes.reduce((total, note) => total + note.chars, 0),
-        lastTouched: found.notes.reduce((latest, note) => Math.max(latest, note.mtimeMs), 0),
+        count: notes.length,
+        chars: notes.reduce((total, note) => total + note.chars, 0),
+        lastTouched: notes.reduce((latest, note) => Math.max(latest, note.mtimeMs), 0),
         source: found.source,
       },
     }
@@ -932,6 +986,11 @@ export function apply(ctx, config) {
 
     for (const hit of await vault.search(query, { limit: 40 })) {
       hits.push({ source: 'sop', path: hit.path, title: hit.title, group: hit.group, line: hit.line, snippet: hit.snippet })
+      counts.sop += 1
+    }
+    // 公共资料库的笔记也一起搜（路径带 @public/ 前缀，点开时回资料库定位）
+    for (const hit of await publicVault.search(query, { limit: 40 })) {
+      hits.push({ source: 'sop', path: PUBLIC_PREFIX + hit.path, title: hit.title, group: hit.group, line: hit.line, snippet: hit.snippet })
       counts.sop += 1
     }
 
@@ -1028,13 +1087,16 @@ export function apply(ctx, config) {
     switch (card.kind) {
       case 'sop': {
         const found = await vault.discover()
+        const publicFound = await publicVault.discover()
+        const notes = [...found.notes, ...publicFound.notes]
         return {
           status: 'ready',
           stats: {
-            count: found.notes.length,
-            chars: found.notes.reduce((total, note) => total + note.chars, 0),
+            count: notes.length,
+            chars: notes.reduce((total, note) => total + note.chars, 0),
             source: found.source,
-            lastTouched: found.notes.reduce((latest, note) => Math.max(latest, note.mtimeMs), 0),
+            lastTouched: notes.reduce((latest, note) => Math.max(latest, note.mtimeMs), 0),
+            publicCount: publicFound.notes.length,
           },
           warning: found.source === 'spotlight' ? '目录枚举被系统挡住，笔记列表走 Spotlight' : undefined,
         }
@@ -1290,15 +1352,18 @@ export function apply(ctx, config) {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
         const body = await readJsonBody(req)
         if (typeof body.path !== 'string' || body.path === '') return writeError(res, 400, 'bad_request', '需要 path')
-        const uri = vault.uriFor(body.path)
-        const registered = await isVaultRegistered(stores.projectRoot, settings.obsidianIndexFile)
+        const { source, rel } = splitSource(body.path)
+        const targetVault = vaultForSource(source)
+        const targetRoot = source === 'public' ? settings.vaultRoot : stores.projectRoot
+        const uri = targetVault.uriFor(rel)
+        const registered = await isVaultRegistered(targetRoot, settings.obsidianIndexFile)
         if (registered) {
           await openExternal(settings.openCommand, uri)
           return writeJson(res, 200, { ok: true, mode: 'obsidian', uri })
         }
         // 项目文件夹还不是 Obsidian 库：用系统默认程序打开这篇笔记，别让「打开」直接失败
-        const note = await vault.readNote(body.path)
-        const absolute = join(stores.projectRoot, ...String(note.path).split('/'))
+        const note = await targetVault.readNote(rel)
+        const absolute = join(targetRoot, ...String(note.path).split('/'))
         await openExternal(settings.openCommand, absolute)
         return writeJson(res, 200, { ok: true, mode: 'file', path: absolute, reason: 'vault-not-registered' })
       }
@@ -1338,9 +1403,11 @@ export function apply(ctx, config) {
       /* ---------------------------------------------------------- 附件（图片） */
       if (route === '/attachment') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const { source, rel } = splitSource(url.searchParams.get('path') ?? '')
+        const attachmentRoot = source === 'public' ? settings.vaultRoot : stores.projectRoot
         const found = await findAttachmentFile(
-          stores.projectRoot,
-          (url.searchParams.get('path') ?? '').trim(),
+          attachmentRoot,
+          rel.trim(),
           (url.searchParams.get('name') ?? '').trim(),
         )
         if (found === null) return writeError(res, 404, 'not_found', '找不到图片附件')
@@ -1358,7 +1425,9 @@ export function apply(ctx, config) {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
         const notePath = url.searchParams.get('note')
         if (notePath !== null && notePath !== '') {
-          return writeJson(res, 200, { ok: true, note: await vault.readNote(notePath) })
+          const { source, rel } = splitSource(notePath)
+          const note = await vaultForSource(source).readNote(rel)
+          return writeJson(res, 200, { ok: true, note: { ...note, path: withSource(source, note.path) } })
         }
         return writeJson(res, 200, await sopListing((url.searchParams.get('q') ?? '').trim()))
       }
@@ -1369,6 +1438,7 @@ export function apply(ctx, config) {
       if (route === '/sop/refresh') {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
         vault.invalidate()
+        publicVault.invalidate()
         return writeJson(res, 200, await sopListing((url.searchParams.get('q') ?? '').trim()))
       }
       if (route === '/sop/note') {
@@ -1377,14 +1447,18 @@ export function apply(ctx, config) {
           if (typeof body.path !== 'string' || typeof body.text !== 'string') {
             return writeError(res, 400, 'bad_request', '需要 path 与 text')
           }
-          return writeJson(res, 200, { ok: true, note: await vault.writeNote(body.path, body.text, { expectedSha1: body.expectedSha1 }) })
+          const { source, rel } = splitSource(body.path)
+          const written = await vaultForSource(source).writeNote(rel, body.text, { expectedSha1: body.expectedSha1 })
+          return writeJson(res, 200, { ok: true, note: { ...written, path: withSource(source, written.path) } })
         }
         if (method === 'POST') {
           const body = await readJsonBody(req)
           if (typeof body.path !== 'string' || typeof body.text !== 'string') {
             return writeError(res, 400, 'bad_request', '需要 path 与 text')
           }
-          return writeJson(res, 200, { ok: true, note: await vault.createNote(body.path, body.text) })
+          const { source, rel } = splitSource(body.path)
+          const created = await vaultForSource(source).createNote(rel, body.text)
+          return writeJson(res, 200, { ok: true, note: { ...created, path: withSource(source, created.path) } })
         }
         return writeError(res, 405, 'method_not_allowed', 'PUT or POST')
       }
