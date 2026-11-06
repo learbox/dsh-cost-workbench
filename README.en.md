@@ -72,6 +72,19 @@ D:\Obsidian\造价工作台
 Saving takes effect immediately, with no restart. An empty path is reported instead of failing silently.
 To change the vault later, open **Settings → Cost Workbench** again and save.
 
+### Opening notes in Obsidian
+
+The library card's **Open** button uses an `obsidian://` deep link, which requires the folder to be
+registered as a vault in Obsidian:
+
+1. Open Obsidian → “Open another vault” → “Open folder as vault”
+2. Pick your workbench vault folder (e.g. `E:\文档\Obsidian\造价工作台`)
+3. From then on **Open** jumps straight to the note
+
+If the vault name inside Obsidian differs from the folder name, fill in
+**Settings → Cost Workbench → Obsidian vault name** (leave empty to use the folder name).
+Without the vault registered, Obsidian shows `Vault not found` — add it once as above.
+
 ### Transcription and balances (optional)
 
 Live transcription in the meeting card and the **DeepSeek balance** / **voice resource pack**

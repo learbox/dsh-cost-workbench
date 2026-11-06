@@ -1584,7 +1584,7 @@ const WB_CALC = {
 
           // 首次使用：还没有配置 Obsidian 库时，先显示引导，不去请求那些会返回 409 的接口
           const [setup, setSetup] = React.useState(null)
-          const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录' })
+          const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '' })
           const [setupBusy, setSetupBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
           React.useEffect(() => {
@@ -1593,7 +1593,7 @@ const WB_CALC = {
               (data) => {
                 if (!alive) return
                 setSetup(data)
-                if (data.configured !== true) setSetupDraft({ vaultRoot: '', sopDir: data.sopDir ?? '00 资料库', recordingsDir: data.recordingsDir ?? '会议记录' })
+                if (data.configured !== true) setSetupDraft({ vaultRoot: '', sopDir: data.sopDir ?? '00 资料库', recordingsDir: data.recordingsDir ?? '会议记录', obsidianVaultName: data.obsidianVaultName ?? '' })
               },
               () => { if (alive) setSetup({ configured: false, error: true }) },
             )
@@ -4175,7 +4175,7 @@ function CalcCard({ t }) {
           ensureStyles()
           const t = makeT(useLanguage())
           const [status, setStatus] = React.useState({ state: 'loading' })
-          const [draft, setDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录' })
+          const [draft, setDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '' })
           const [busy, setBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
           const [flash, setFlash] = React.useState(null)
@@ -4190,6 +4190,7 @@ function CalcCard({ t }) {
                   vaultRoot: data.vaultRoot ?? '',
                   sopDir: data.sopDir ?? '00 资料库',
                   recordingsDir: data.recordingsDir ?? '会议记录',
+                  obsidianVaultName: data.obsidianVaultName ?? '',
                 })
               },
               (error) => { if (alive) setStatus({ state: 'error', message: error.message }) },
@@ -4356,6 +4357,7 @@ function CalcCard({ t }) {
                 }, pickerBusy ? '选择中…' : '选择…'),
               ),
               field('资料库子目录（相对库根目录）', draft.sopDir, (value) => setDraft((current) => ({ ...current, sopDir: value }))),
+              field('Obsidian 库名（可选；默认用文件夹名）', draft.obsidianVaultName, (value) => setDraft((current) => ({ ...current, obsidianVaultName: value }))),
               field('录音存放子目录', draft.recordingsDir, (value) => setDraft((current) => ({ ...current, recordingsDir: value }))),
               h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),

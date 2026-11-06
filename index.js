@@ -84,6 +84,8 @@ const DEFAULT_CONFIG = {
   // 全部留空或取中性值：安装后由首次引导写入 ~/.dsh-workbench/config.json
   vaultRoot: '',
   sopDir: '00 资料库',
+  // Obsidian 库名：默认空 = 用库文件夹名；Obsidian 里改过库名时填这里
+  obsidianVaultName: '',
   workbenchDir: 'Workbench',
   dataDir: '',
   cardsFile: '',
@@ -111,7 +113,7 @@ function resolveConfig(config, configFile = null) {
   }
   // 用户配置文件的优先级介于「默认值」与「profile 配置」之间
   if (configFile !== null && typeof configFile === 'object') {
-    for (const key of ['vaultRoot', 'dataDir', 'sopDir', 'workbenchDir', 'recordingsDir']) {
+    for (const key of ['vaultRoot', 'dataDir', 'sopDir', 'obsidianVaultName', 'workbenchDir', 'recordingsDir']) {
       const value = typeof configFile[key] === 'string' ? configFile[key].trim() : ''
       if (value !== '' && (merged[key] === '' || merged[key] === DEFAULT_CONFIG[key] || key === 'vaultRoot')) merged[key] = value
     }
@@ -175,7 +177,7 @@ function openExternal(command, target) {
   const custom = typeof command === 'string' ? command.trim() : ''
   return new Promise((resolve, reject) => {
     const done = (error) => {
-      if (error !== null) reject(Object.assign(new Error('打开失败：' + describe(error)), { code: 'open_failed' }))
+      if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
       else resolve()
     }
     try {
@@ -184,7 +186,9 @@ function openExternal(command, target) {
         return
       }
       if (process.platform === 'win32') {
-        execFile('cmd', ['/c', 'start', '', target], { timeout: 5000, windowsHide: true }, done)
+        // 不能经 cmd：URL 里的 %E9... 会被 cmd 当环境变量展开（& 也可能被切分）。
+        // rundll32 直接交给 ShellExecute，参数原样传递。
+        execFile('rundll32.exe', ['url.dll,FileProtocolHandler', target], { timeout: 5000, windowsHide: true }, done)
         return
       }
       execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { timeout: 5000 }, done)
@@ -432,6 +436,7 @@ export function apply(ctx, config) {
     vaultRoot: settings.vaultRoot,
     sopDir: settings.sopDir,
     backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+    vaultName: settings.obsidianVaultName,
   })
   let costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
   let recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
@@ -442,6 +447,7 @@ export function apply(ctx, config) {
       configured: settings.vaultRoot !== '',
       vaultRoot: settings.vaultRoot,
       sopDir: settings.sopDir,
+      obsidianVaultName: settings.obsidianVaultName,
       workbenchDir: settings.workbenchDir,
       recordingsDir: settings.recordingsDir,
       dataDir: settings.dataDir,
@@ -456,6 +462,7 @@ export function apply(ctx, config) {
       vaultRoot: settings.vaultRoot,
       sopDir: settings.sopDir,
       backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+      vaultName: settings.obsidianVaultName,
     })
     costTables = createCostTables({ workbenchDir: join(settings.vaultRoot, settings.workbenchDir) })
     recordings = createRecordingStore({ root: join(settings.vaultRoot, settings.recordingsDir) })
@@ -847,6 +854,7 @@ export function apply(ctx, config) {
           const next = {
             vaultRoot,
             sopDir: typeof body.sopDir === 'string' && body.sopDir.trim() !== '' ? body.sopDir.trim() : '00 资料库',
+            obsidianVaultName: typeof body.obsidianVaultName === 'string' ? body.obsidianVaultName.trim() : '',
             workbenchDir: typeof body.workbenchDir === 'string' && body.workbenchDir.trim() !== '' ? body.workbenchDir.trim() : 'Workbench',
             recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : '会议记录',
             dataDir: typeof body.dataDir === 'string' && body.dataDir.trim() !== '' ? body.dataDir.trim() : '',
