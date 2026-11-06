@@ -1420,7 +1420,7 @@ const WB_CALC = {
     }
 
     return {
-      inject: ['slots'],
+      inject: ['slots', 'workspaces'],
       _calc: WB_CALC,
       _md: renderMarkdown,
       apply(ctx) {
@@ -4666,6 +4666,33 @@ function CalcCard({ t }) {
             ).finally(() => setPickerBusy(false))
           }
 
+          // 在工作台里直接新建造价项目工作区：选目录 → DSH 工作区 API 添加 → 写标记并初始化
+          const createProjectWorkspace = () => {
+            setPickerBusy(true)
+            setFlash(null)
+            api('/pick-folder', { method: 'POST', body: {} }).then(
+              (data) => {
+                if (data === null || data.cancelled === true) return null
+                const target = typeof data.path === 'string' ? data.path.trim() : ''
+                if (target === '') return null
+                const workspaces = ctx.workspaces
+                if (workspaces === undefined || workspaces === null || typeof workspaces.create !== 'function') {
+                  setFlash('当前 DSH 版本不支持插件创建工作区，请先在左侧栏手动添加工作区')
+                  return null
+                }
+                return workspaces.create({ path: target }).then((workspace) =>
+                  api('/project/mark', { method: 'POST', body: { path: target, enable: true } }).then(() => workspace),
+                ).then((workspace) => {
+                  const title = workspace !== null && typeof workspace === 'object' && typeof workspace.title === 'string'
+                    ? workspace.title
+                    : target
+                  setFlash('已创建造价项目工作区「' + title + '」，切换到它即可开始')
+                })
+              },
+              (error) => setFlash('选择文件夹失败：' + error.message),
+            ).catch((error) => setFlash('创建失败：' + error.message)).finally(() => setPickerBusy(false))
+          }
+
           const save = () => {
             const vaultRoot = String(draft.vaultRoot ?? '').trim()
             if (vaultRoot === '') {
@@ -4771,6 +4798,11 @@ function CalcCard({ t }) {
                   h('strong', null, '允许笔记中的原始 HTML'),
                   h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, '（默认关闭；勾选启用时会二次确认）'),
                 ),
+              ),
+              h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '14px' } },
+                h('button', { type: 'button', className: 'dsh-wb-btn', disabled: pickerBusy, onClick: createProjectWorkspace }, pickerBusy ? '处理中…' : '新建造价项目工作区'),
+                h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } },
+                  '选一个文件夹 → 自动加为 DSH 工作区，并建好 造价工作台/会议记录'),
               ),
               h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),

@@ -309,6 +309,15 @@ try {
   const statusProject = await call('GET', '/context/status?sessionId=' + encodeURIComponent('session-test-1'))
   check('status 查询返回项目标记', statusProject.status === 200 && statusProject.json.marked === 'project', statusProject.raw.slice(0, 160))
 
+  /* ---------------------------------------------- 新建造价项目工作区 */
+  const markedDir = join(tmp.dir, '新建工作区')
+  await mkdir(markedDir, { recursive: true })
+  const markNew = await call('POST', '/project/mark', { path: markedDir })
+  check('新建造价项目工作区写标记', markNew.status === 200 && markNew.json.marked === 'project', markNew.raw.slice(0, 160))
+  check('新建造价项目工作区初始化目录', await readFile(join(markedDir, '造价工作台', '计价依据.md'), 'utf8').then((text) => text.includes('# 计价依据速查'), () => false))
+  check('新建造价项目工作区标记文件', await access(join(markedDir, '.dsh-cost-workbench.json')).then(() => true, () => false))
+  check('拒绝不存在的目录', (await call('POST', '/project/mark', { path: join(tmp.dir, '不存在') })).status === 400)
+
   const ctxOff = await call('POST', '/context', { sessionId: '' })
   check('清空会话后回退公共库', ctxOff.status === 200 && ctxOff.json.project === '')
   const publicStandards = await call('GET', '/standards')

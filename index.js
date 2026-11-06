@@ -1277,6 +1277,35 @@ export function apply(ctx, config) {
         })
       }
 
+      // 工作台里「新建造价项目工作区」：对用户选的目录写标记并初始化（不依赖当前会话）
+      if (route === '/project/mark') {
+        if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
+        const body = await readJsonBody(req)
+        const target = typeof body.path === 'string' ? body.path.trim() : ''
+        if (target === '' || !isAbsolutePath(target)) return writeError(res, 400, 'bad_request', '需要绝对路径')
+        let info = null
+        try {
+          info = await stat(target)
+        } catch {
+          return writeError(res, 400, 'bad_path', '目录不存在：' + target)
+        }
+        if (!info.isDirectory()) return writeError(res, 400, 'bad_path', '不是目录：' + target)
+        const enable = body.enable !== false
+        try {
+          await writeFile(join(target, PROJECT_MARKER), JSON.stringify({ project: enable, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+        } catch (error) {
+          return writeError(res, 500, 'mark_failed', '写项目标记失败：' + describe(error))
+        }
+        const layout = enable ? await ensureProjectLayout(buildStores(settings, target)) : { ok: true }
+        return writeJson(res, 200, {
+          ok: true,
+          path: target,
+          marked: enable ? 'project' : 'plain',
+          project: basename(target),
+          initialized: layout.ok === true,
+        })
+      }
+
       // 只读查询：会话对应工作区的标记状态（入口按钮用它决定显示/隐藏，不触发重建）
       if (route === '/context/status') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
