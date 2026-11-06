@@ -186,9 +186,10 @@ function openExternal(command, target) {
         return
       }
       if (process.platform === 'win32') {
-        // 不能经 cmd：URL 里的 %E9... 会被 cmd 当环境变量展开（& 也可能被切分）。
-        // rundll32 直接交给 ShellExecute，参数原样传递。
-        execFile('rundll32.exe', ['url.dll,FileProtocolHandler', target], { timeout: 5000, windowsHide: true }, done)
+        // 不能用 cmd（URL 里的 %XX 会被当变量展开），rundll32 对带查询串的协议也不稳；
+        // PowerShell 的 Start-Process 走 ShellExecute，URL 原样交给协议处理器。
+        const escaped = target.replace(/'/g, "''")
+        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', "Start-Process -FilePath '" + escaped + "'"], { timeout: 8000, windowsHide: true }, done)
         return
       }
       execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { timeout: 5000 }, done)
