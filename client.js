@@ -1886,12 +1886,6 @@ const WB_CALC = {
               // 隐私模式下写不了 localStorage 也不影响使用。
             }
           }, [mode])
-          // 工作区类型决定默认模式：造价项目 → 造价模式；普通/未标记 → 普通模式
-          React.useEffect(() => {
-            if (projectInfo === null || modeTouched) return
-            const isProject = typeof projectInfo.project === 'string' && projectInfo.project !== ''
-            setMode(isProject ? 'cost' : 'lite')
-          }, [projectInfo, modeTouched])
 
           /** 消费之后强制取一次用量（平时不轮询）。 */
           const refreshUsage = React.useCallback(() => {
@@ -1932,6 +1926,13 @@ const WB_CALC = {
           const [obsidianStatus, setObsidianStatus] = React.useState(null)
           const [registerHelp, setRegisterHelp] = React.useState(false)
           const [allowHtml, setAllowHtml] = React.useState(false)
+          // 工作区类型决定默认模式：造价项目 → 造价模式；普通/未标记 → 普通模式
+          // （必须在 projectInfo 声明之后，否则会触发 TDZ 错误导致整个面板崩溃）
+          React.useEffect(() => {
+            if (projectInfo === null || modeTouched) return
+            const isProject = typeof projectInfo.project === 'string' && projectInfo.project !== ''
+            setMode(isProject ? 'cost' : 'lite')
+          }, [projectInfo, modeTouched])
           React.useEffect(() => {
             let alive = true
             api('/config').then(
