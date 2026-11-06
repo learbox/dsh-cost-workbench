@@ -719,7 +719,7 @@ const WB_CALC = {
 .dsh-wb-badge-btn:hover .dsh-wb-tip{display:block}
 .dsh-wb-badge-jump{margin-left:3px;opacity:.55;font-size:calc(var(--wb-fs) - 2px);cursor:pointer}
 .dsh-wb-badge-jump:hover{opacity:1}
-.dsh-wb-badge-btn{position:relative;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:calc(var(--wb-fs) - 1px);cursor:pointer}
+.dsh-wb-badge-btn{position:relative;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:calc(var(--wb-fs) - 1px);cursor:pointer;white-space:nowrap;flex:none}
 .dsh-wb-badge-btn b{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
 .dsh-wb-badge-btn[data-state=peak]{background:rgba(255,149,0,.16);border-color:rgba(255,149,0,.55)}
 .dsh-wb-badge-btn[data-state=peak] b{color:#c9740a}
@@ -2263,8 +2263,8 @@ const WB_CALC = {
                       + '（点击刷新）',
                 },
                   h('span', null, '语音'),
-                  h('b', null, '录音'), h('span', null, usage.volc.error !== undefined ? '—' : (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—')),
-                  h('b', null, '流式'), h('span', null, usage.volc.error !== undefined ? '—' : (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '—')),
+                  h('b', null, '录音 ' + (usage.volc.error !== undefined ? '—' : (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—'))),
+                  h('b', null, '流式 ' + (usage.volc.error !== undefined ? '—' : (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '—'))),
                   h('span', {
                     className: 'dsh-wb-badge-jump',
                     title: '打开火山引擎控制台查看语音资源包',
