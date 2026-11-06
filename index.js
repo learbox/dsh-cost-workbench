@@ -725,9 +725,11 @@ export function apply(ctx, config) {
   const PUBLIC_PREFIX = '@public/'
   function splitSource(relPath) {
     const text = String(relPath ?? '')
-    return text.startsWith(PUBLIC_PREFIX)
-      ? { source: 'public', rel: text.slice(PUBLIC_PREFIX.length) }
-      : { source: 'project', rel: text }
+    if (text === '@public') return { source: 'public', rel: '' }
+    if (text.startsWith(PUBLIC_PREFIX)) return { source: 'public', rel: text.slice(PUBLIC_PREFIX.length) }
+    if (text === '@project') return { source: 'project', rel: '' }
+    if (text.startsWith('@project/')) return { source: 'project', rel: text.slice('@project/'.length) }
+    return { source: 'project', rel: text }
   }
   function vaultForSource(source) {
     return source === 'public' ? publicVault : vault
@@ -942,14 +944,26 @@ export function apply(ctx, config) {
       ...found.notes,
       ...publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path })),
     ]
+    const publicTree = query === '' ? await publicVault.tree() : null
+    const projectContainer = query === ''
+      ? [
+          {
+            type: 'dir',
+            name: '项目资料库',
+            path: '@project',
+            children: tree ?? [],
+            count: found.notes.length,
+          },
+        ]
+      : []
     const mergedTree = query === ''
       ? [
-          ...(tree ?? []),
+          ...(stores.project === '' ? (tree ?? []) : projectContainer),
           {
             type: 'dir',
             name: '公共资料库',
             path: PUBLIC_PREFIX.slice(0, -1),
-            children: prefixTree(await publicVault.tree(), PUBLIC_PREFIX),
+            children: prefixTree(publicTree, PUBLIC_PREFIX),
             count: publicFound.notes.length,
           },
         ]

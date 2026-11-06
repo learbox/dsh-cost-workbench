@@ -193,7 +193,9 @@ try {
   /* ---------------------------------------------- 公共资料库合并显示 */
   const mergedSop = await call('GET', '/sop')
   const mergedTree = Array.isArray(mergedSop.json.tree) ? mergedSop.json.tree : []
+  check('资料库树含项目资料库节点', mergedTree.some((node) => node.type === 'dir' && node.name === '项目资料库'), JSON.stringify(mergedTree.map((node) => node.name)))
   check('资料库树含公共资料库节点', mergedTree.some((node) => node.type === 'dir' && node.name === '公共资料库'), JSON.stringify(mergedTree.map((node) => node.name)))
+  check('项目与公共合并成两个根节点', mergedTree.length === 2, mergedTree.length)
   check('公共笔记以 @public 前缀出现在列表', mergedSop.json.notes.some((note) => String(note.path).startsWith('@public/')), JSON.stringify(mergedSop.json.notes.map((note) => note.path)))
   const publicNote = await call('GET', '/sop?note=' + encodeURIComponent('@public/00 资料库/甲.md'))
   check('读取公共笔记', publicNote.status === 200 && String(publicNote.json.note.path).startsWith('@public/'), publicNote.raw.slice(0, 160))
@@ -204,7 +206,7 @@ try {
   check('搜索能命中公共笔记', publicSearch.json.hits.some((hit) => hit.source === 'sop' && String(hit.path).startsWith('@public/')), JSON.stringify(publicSearch.json.hits.map((hit) => hit.path)))
   check('项目数据落在会话工作区', await readFile(join(projectDir, '造价工作台', '计价依据.md'), 'utf8').then((text) => text.includes('W-001'), () => false))
   const projectSop = await call('GET', '/sop')
-  check('资料库=项目根（含造价工作台目录）', projectSop.status === 200 && Array.isArray(projectSop.json.tree) && projectSop.json.tree.some((node) => node.type === 'dir' && node.name === '造价工作台'), projectSop.raw.slice(0, 160))
+  check('资料库=项目根（含造价工作台目录）', projectSop.status === 200 && Array.isArray(projectSop.json.tree) && projectSop.json.tree.some((node) => node.type === 'dir' && node.name === '项目资料库' && (Array.isArray(node.children) ? node.children : []).some((child) => child.name === '造价工作台')), projectSop.raw.slice(0, 200))
   const projectRecording = await call('GET', '/recordings')
   check('会议记录指向项目目录', projectRecording.status === 200 && projectRecording.json.dir === join(projectDir, '会议记录'), projectRecording.json.dir)
 

@@ -2982,14 +2982,15 @@ function CalcCard({ t }) {
           const collectFolders = (nodes, depth) => {
             for (const node of nodes) {
               if (node.type !== 'dir') continue
-              if (node.count > 0) {
+              const isContainer = node.path === '@project' || node.path === '@public'
+              if (!isContainer && node.count > 0) {
                 folders.push({
                   label: '\u3000'.repeat(depth) + node.name,
                   value: sopBase === '' || String(node.path).startsWith('@public') ? node.path : sopBase + '/' + node.path,
                   depth,
                 })
               }
-              collectFolders(node.children, depth + 1)
+              collectFolders(Array.isArray(node.children) ? node.children : [], depth + 1)
             }
           }
           collectFolders(tree, 0)

@@ -44,10 +44,11 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 - 术语表仍是公共库的 `Workbench/术语表.md`（`vaultRoot` 配置只影响公共资料）
 - 没有会话工作区（空 sessionId / 索引里找不到）→ 回退公共库旧布局
 
-**公共资料库合并**：`sopListing()` 把公共库（`settings.vaultRoot` 的 `sopDir`）的树合并到项目树末尾，
-节点名「公共资料库」，路径统一加 `@public/` 前缀（`@public/00 资料库/xxx.md`）。`splitSource()` 按前缀
-分流读/写/打开/附件（`vaultForSource`），`/search` 同时搜两个 vault（命中 path 带前缀）。新增走笔记
-路径的接口时必须过 `splitSource`，否则公共笔记会被写到项目根。
+**公共资料库合并**：`sopListing()` 在项目模式下把树根固定成两个容器：`项目资料库`（`@project`，children 是
+项目根树、路径无前缀）与 `公共资料库`（`@public`，children 来自 `settings.vaultRoot` 的 `sopDir`，路径统一加
+`@public/` 前缀）。回退模式（无会话工作区）不包容器，保持平铺。`splitSource()` 按前缀分流读/写/打开/附件
+（`vaultForSource`），并识别容器路径 `@project`/`@public`；`/search` 同时搜两个 vault（公共命中带前缀）。
+新增走笔记路径的接口时必须过 `splitSource`，否则公共笔记会被写到项目根。客户端新建目录下拉会跳过容器节点。
 
 项目切换不落盘（不写 config.json）：每次面板打开/会话变化重新解析，因此多个会话各自
 跟随自己的工作区。改这里的路径派生逻辑时，`buildStores()` 是唯一入口。
