@@ -2,3 +2,7 @@ node_modules/
 *.log
 .DS_Store
 test/.tmp/
+# 本地凭据（正常在 ~/.dsh-workbench/asr.json；这里防止误拷进仓库后提交）
+asr.json
+*.key
+.env
