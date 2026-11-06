@@ -2235,6 +2235,7 @@ const WB_CALC = {
             h('button', {
               type: 'button',
               className: 'dsh-wb-badge-btn',
+              style: { whiteSpace: 'nowrap', flexShrink: 0 },
               title: projectInfo !== null && projectInfo.marked === 'project'
                 ? '把当前工作区转为普通工作区（数据回退公共库，不删除文件）'
                 : '把当前工作区转为造价工作区（自动建 造价工作台/ 与 会议记录/）',
@@ -2244,7 +2245,7 @@ const WB_CALC = {
                 markProject(projectInfo.marked !== 'project')
               },
             },
-              h('span', null, projectInfo !== null && projectInfo.marked === 'project' ? '转为普通工作区' : '转为造价工作区'),
+              h('span', null, projectInfo !== null && projectInfo.marked === 'project' ? '转为普通' : '转为造价'),
             ),
             h('button', {
               type: 'button',
