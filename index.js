@@ -516,6 +516,30 @@ function credentialStatus(asr) {
   }
 }
 
+/**
+ * 项目模式下的目录初始化（幂等）：建 `造价工作台/`、`会议记录/`，缺哪张表就写一张空表。
+ * 不覆盖已有文件；失败不阻塞面板（只是对应目录要等第一次写入时才自动创建）。
+ */
+async function ensureProjectLayout(stores) {
+  if (stores.project === '') return { ok: true }
+  try {
+    await mkdir(stores.workbenchDir, { recursive: true })
+    await mkdir(stores.recordingsRoot, { recursive: true })
+    const tables = createCostTables({ workbenchDir: stores.workbenchDir })
+    for (const kind of COST_TABLE_KINDS) {
+      const table = tables[kind]
+      try {
+        await stat(table.file)
+      } catch {
+        await writeFile(table.file, table.serialize([]), 'utf8')
+      }
+    }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, message: describe(error) }
+  }
+}
+
 /** 读原始字节体（音频分片用），超过上限直接拒绝。 */
 async function readRawBody(req, maxBytes) {
   const chunks = []
@@ -1043,11 +1067,13 @@ export function apply(ctx, config) {
         }
         sessionWorkspace = workspace
         rebuild()
+        const layout = await ensureProjectLayout(stores)
         return writeJson(res, 200, {
           ok: true,
           sessionId,
           project: stores.project,
           projectRoot: stores.projectRoot,
+          initialized: layout.ok === true,
         })
       }
 

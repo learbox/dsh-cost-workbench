@@ -53,6 +53,9 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 POST   /context            解析会话工作区并重建（sessionId 为空 = 回退公共库）
 ```
 
+识别到项目后会调用 `ensureProjectLayout()` 幂等创建 `造价工作台/`、`会议记录/` 与缺失的空表；
+已有文件不覆盖，失败不阻塞读取（退回到第一次写入时创建）。
+
 ## 造价三张表：CRUD 机制
 
 三张表共用 `lib/table.js`，`lib/tables.js` 只声明列、主键和落盘文件名（`createCostTables({ workbenchDir })`）：

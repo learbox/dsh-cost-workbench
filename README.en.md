@@ -190,6 +190,10 @@ Usage: add a project folder as a DSH workspace, e.g.
 `E:\文档\learbox的工作空间\2018年工作文件\华远售楼处`, then open the workbench in a session of
 that workspace — data is written into that project folder, next to the BOQ and tender files.
 
+The first time a project is recognised, `造价工作台\`, `会议记录\` and the three empty tables are
+**created automatically**; existing files are never overwritten (if the folder is not writable it
+falls back to creating them on the first write).
+
 ## Where things live
 
 ```

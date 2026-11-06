@@ -182,6 +182,7 @@ try {
   const ctxOn = await call('POST', '/context', { sessionId: 'session-test-1' })
   check('识别会话工作区为项目根', ctxOn.status === 200 && ctxOn.json.projectRoot === projectDir, ctxOn.raw.slice(0, 160))
   check('项目名取工作区文件夹名', ctxOn.json.project === '项目工作区')
+  check('识别项目后自动初始化目录与空表', await readFile(join(projectDir, '造价工作台', '变更签证台账.md'), 'utf8').then((text) => text.includes('# 变更签证台账'), () => false))
   const projectStandards = await call('GET', '/standards')
   check('项目内读到空表', projectStandards.status === 200 && projectStandards.json.entries.length === 0)
   const projectAdd = await call('POST', '/standards', { code: 'W-001', name: '项目专用计价依据', category: '项目', version: 'v1', date: '', note: '' })
