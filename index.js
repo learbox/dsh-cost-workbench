@@ -337,6 +337,33 @@ function isAbsolutePath(value) {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
+/** 读 asr.json（凭据文件）；读不到当空对象。只在 Host 内使用，绝不返回明文。 */
+async function readAsrSettings(file) {
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    return parsed !== null && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 凭据状态：只告诉界面"配没配"，不吐任何密钥。 */
+function credentialStatus(asr) {
+  const volc = asr !== null && typeof asr === 'object' && asr.volcengine !== null && typeof asr.volcengine === 'object' ? asr.volcengine : {}
+  const deepseek = asr !== null && typeof asr === 'object' && asr.deepseek !== null && typeof asr.deepseek === 'object' ? asr.deepseek : {}
+  const present = (value) => typeof value === 'string' && value.trim() !== ''
+  return {
+    volcengine: {
+      apiKey: present(volc.apiKey),
+      accessKey: present(volc.accessKey),
+      secretKey: present(volc.secretKey),
+      resourceIdStreaming: typeof volc.resourceIdStreaming === 'string' ? volc.resourceIdStreaming : '',
+      boostingTableId: present(volc.boostingTableId),
+    },
+    deepseek: { apiKey: present(deepseek.apiKey) },
+  }
+}
+
 /** 读原始字节体（音频分片用），超过上限直接拒绝。 */
 async function readRawBody(req, maxBytes) {
   const chunks = []
@@ -836,6 +863,51 @@ export function apply(ctx, config) {
           await writeFile(settings.userConfigFile, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
           rebuild()
           return writeJson(res, 200, { ok: true, ...configStatus() })
+        }
+        return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
+      }
+
+      /* ------------------------------------------------------ 语音凭据 */
+      // 只告诉界面配置状态；明文只在 Host 内部用于调用语音服务，永不回传。
+      if (route === '/credentials') {
+        if (method === 'GET') {
+          return writeJson(res, 200, { ok: true, ...credentialStatus(await readAsrSettings(settings.asrConfigFile)) })
+        }
+        if (method === 'PUT') {
+          const body = await readJsonBody(req)
+          const current = await readAsrSettings(settings.asrConfigFile)
+          const next = { ...current }
+          const volc = { ...(current.volcengine !== null && typeof current.volcengine === 'object' ? current.volcengine : {}) }
+          const deepseek = { ...(current.deepseek !== null && typeof current.deepseek === 'object' ? current.deepseek : {}) }
+          const setIf = (target, key, value) => {
+            if (typeof value === 'string' && value.trim() !== '') target[key] = value.trim()
+          }
+          if (body.volcengine !== null && typeof body.volcengine === 'object') {
+            setIf(volc, 'apiKey', body.volcengine.apiKey)
+            setIf(volc, 'accessKey', body.volcengine.accessKey)
+            setIf(volc, 'secretKey', body.volcengine.secretKey)
+            setIf(volc, 'resourceIdStreaming', body.volcengine.resourceIdStreaming)
+            setIf(volc, 'boostingTableId', body.volcengine.boostingTableId)
+          }
+          if (body.deepseek !== null && typeof body.deepseek === 'object') {
+            setIf(deepseek, 'apiKey', body.deepseek.apiKey)
+          }
+          // 显式清除：body.clear = ['volcengine.apiKey', 'deepseek.apiKey', ...]
+          if (Array.isArray(body.clear)) {
+            for (const item of body.clear) {
+              if (item === 'volcengine.apiKey') delete volc.apiKey
+              if (item === 'volcengine.accessKey') delete volc.accessKey
+              if (item === 'volcengine.secretKey') delete volc.secretKey
+              if (item === 'volcengine.resourceIdStreaming') delete volc.resourceIdStreaming
+              if (item === 'volcengine.boostingTableId') delete volc.boostingTableId
+              if (item === 'deepseek.apiKey') delete deepseek.apiKey
+            }
+          }
+          next.volcengine = volc
+          next.deepseek = deepseek
+          await mkdir(dirname(settings.asrConfigFile), { recursive: true })
+          await writeFile(settings.asrConfigFile, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
+          return writeJson(res, 200, { ok: true, ...credentialStatus(next) })
         }
         return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
       }

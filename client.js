@@ -4203,6 +4203,58 @@ function CalcCard({ t }) {
             return () => clearTimeout(timer)
           }, [flash])
 
+          /* ------------------------------------------------ 语音凭据（可选） */
+          const [creds, setCreds] = React.useState(null)
+          const [credDraft, setCredDraft] = React.useState({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '', deepseekKey: '' })
+          const [credBusy, setCredBusy] = React.useState(false)
+          const [credFlash, setCredFlash] = React.useState(null)
+
+          React.useEffect(() => {
+            let alive = true
+            api('/credentials').then(
+              (data) => { if (alive) setCreds(data) },
+              () => { if (alive) setCreds(null) },
+            )
+            return () => { alive = false }
+          }, [])
+
+          React.useEffect(() => {
+            if (credFlash === null) return undefined
+            const timer = setTimeout(() => setCredFlash(null), 3200)
+            return () => clearTimeout(timer)
+          }, [credFlash])
+
+          const saveCreds = () => {
+            const body = { volcengine: {}, deepseek: {} }
+            if (credDraft.volcApiKey.trim() !== '') body.volcengine.apiKey = credDraft.volcApiKey.trim()
+            if (credDraft.volcAccessKey.trim() !== '') body.volcengine.accessKey = credDraft.volcAccessKey.trim()
+            if (credDraft.volcSecretKey.trim() !== '') body.volcengine.secretKey = credDraft.volcSecretKey.trim()
+            if (credDraft.deepseekKey.trim() !== '') body.deepseek.apiKey = credDraft.deepseekKey.trim()
+            if (Object.keys(body.volcengine).length === 0 && Object.keys(body.deepseek).length === 0) {
+              setCredFlash('没有新填写的内容；已配置的密钥不会回显，留空表示不修改')
+              return
+            }
+            setCredBusy(true)
+            setCredFlash(null)
+            api('/credentials', { method: 'PUT', body }).then(
+              (data) => {
+                setCreds(data)
+                setCredDraft({ volcApiKey: '', volcAccessKey: '', volcSecretKey: '', deepseekKey: '' })
+                setCredFlash('凭据已保存；余额角标点刷新、录音转写下次开始即生效')
+              },
+              (error) => setCredFlash('保存失败：' + error.message),
+            ).finally(() => setCredBusy(false))
+          }
+
+          const clearCred = (path) => {
+            setCredBusy(true)
+            setCredFlash(null)
+            api('/credentials', { method: 'PUT', body: { clear: [path] } }).then(
+              (data) => { setCreds(data); setCredFlash('已清除') },
+              (error) => setCredFlash('清除失败：' + error.message),
+            ).finally(() => setCredBusy(false))
+          }
+
           const pick = () => {
             setPickerBusy(true)
             setFlash(null)
@@ -4253,6 +4305,33 @@ function CalcCard({ t }) {
             ),
           )
 
+          const credField = (labelText, key, clearPath, configured) => h('div', { style: { marginTop: '10px' } },
+            h('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' } },
+              h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } },
+                labelText + '：' + (configured ? '已配置' : '未配置')),
+              configured
+                ? h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => clearCred(clearPath) }, '清除')
+                : null,
+            ),
+            h('input', {
+              className: 'dsh-wb-input',
+              type: 'password',
+              autoComplete: 'off',
+              style: { width: '100%', marginTop: '4px', boxSizing: 'border-box' },
+              value: credDraft[key],
+              placeholder: configured ? '已配置（留空不修改）' : '未配置（可留空）',
+              onChange: (event) => setCredDraft((current) => ({ ...current, [key]: event.target.value })),
+            }),
+          )
+          const credFields = creds === null
+            ? [h('p', { className: 'dsh-wb-note', style: { marginTop: '8px' } }, '正在读取凭据状态…')]
+            : [
+                credField('火山流式语音 API Key（会议记录转写）', 'volcApiKey', 'volcengine.apiKey', creds.volcengine?.apiKey === true),
+                credField('火山 AccessKey（查语音资源包余额）', 'volcAccessKey', 'volcengine.accessKey', creds.volcengine?.accessKey === true),
+                credField('火山 SecretKey', 'volcSecretKey', 'volcengine.secretKey', creds.volcengine?.secretKey === true),
+                credField('DeepSeek API Key（顶部余额角标）', 'deepseekKey', 'deepseek.apiKey', creds.deepseek?.apiKey === true),
+              ]
+
           if (status.state === 'loading') return h('div', { className: 'dsh-wb-loading' }, t('panel.loading'))
           if (status.state === 'error') {
             return h('div', { className: 'dsh-wb-error' }, t('panel.error') + '：' + status.message)
@@ -4281,6 +4360,20 @@ function CalcCard({ t }) {
               h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),
                 h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => { if (typeof close === 'function') close() } }, '关闭'),
+              ),
+            ),
+            h('div', { className: 'dsh-wb-card', style: { marginTop: '14px', padding: '14px 16px' } },
+              h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
+                h('h3', { style: { margin: 0, fontSize: '14px' } }, '语音转写与余额（可选）'),
+                h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } },
+                  '不填完全不影响资料库、三张表、计算器等其它功能'),
+              ),
+              h('p', { className: 'dsh-wb-note', style: { marginTop: '6px' } },
+                '填了才会出现顶部的 DeepSeek 余额 / 语音资源包角标，会议记录卡也才能实时转写。凭据只写在 ~/.dsh-workbench/asr.json，不会回显、不上传。'),
+              ...credFields,
+              credFlash !== null ? h('div', { className: 'dsh-wb-error', style: { marginTop: '10px' } }, credFlash) : null,
+              h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '12px' } },
+                h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: credBusy, onClick: saveCreds }, credBusy ? '保存中…' : '保存凭据'),
               ),
             ),
             h('p', { className: 'dsh-wb-note', style: { marginTop: '10px' } },

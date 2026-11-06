@@ -28,6 +28,9 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 数据：笔记、录音、三张表、术语表都在用户的 Obsidian vault 里；`cards.json`、`prompts.json`、
 `config.json`、可选的 `asr.json` 在 `~/.dsh-workbench/`。
 
+设置页（`settings.section`）同一页管理两件事：vault 路径/子目录（`/config`）与语音凭据
+（`/credentials`，读 `asr.json`，响应只给「已配置」布尔值，绝不回显明文；显式清除走 `clear` 数组）。
+
 ## 造价三张表：CRUD 机制
 
 三张表共用 `lib/table.js`，`lib/tables.js` 只声明列、主键和落盘文件名（`createCostTables({ workbenchDir })`）：

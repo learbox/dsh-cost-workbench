@@ -106,6 +106,22 @@ try {
   const picker = await call('POST', '/pick-folder', {})
   check('文件夹选择器失败时报 picker_failed', picker.status === 500 && picker.json.code === 'picker_failed', picker.raw.slice(0, 160))
 
+  /* ------------------------------------------------------ 语音凭据（可选） */
+  const credsBefore = await call('GET', '/credentials')
+  check('凭据初始未配置', credsBefore.status === 200 && credsBefore.json.volcengine.apiKey === false && credsBefore.json.deepseek.apiKey === false)
+  const credsPut = await call('PUT', '/credentials', {
+    volcengine: { apiKey: 'volc-test-key', accessKey: 'AK123', secretKey: 'SK123' },
+    deepseek: { apiKey: 'sk-test' },
+  })
+  check('凭据保存 200', credsPut.status === 200 && credsPut.json.volcengine.apiKey === true && credsPut.json.deepseek.apiKey === true)
+  check('凭据响应不含明文', !credsPut.raw.includes('volc-test-key') && !credsPut.raw.includes('SK123'), credsPut.raw.slice(0, 200))
+  check('凭据落到 asr.json', (await readFile(join(dataDir, 'asr.json'), 'utf8')).includes('volc-test-key'))
+  const credsAfter = await call('GET', '/credentials')
+  check('凭据状态可读', credsAfter.json.volcengine.accessKey === true && credsAfter.json.volcengine.resourceIdStreaming === '')
+  const credsClear = await call('PUT', '/credentials', { clear: ['volcengine.apiKey'] })
+  check('凭据可单独清除', credsClear.json.volcengine.apiKey === false && credsClear.json.volcengine.accessKey === true)
+  check('清除后文件里也没有该字段', !(await readFile(join(dataDir, 'asr.json'), 'utf8')).includes('volc-test-key'))
+
   const current = await call('GET', '/sop?note=' + encodeURIComponent('00 资料库/甲.md'))
   check('临时 vault 读到正文', current.status === 200 && current.json.note.text.includes('原文'))
 

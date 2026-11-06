@@ -72,6 +72,26 @@ D:\Obsidian\造价工作台
 Saving takes effect immediately, with no restart. An empty path is reported instead of failing silently.
 To change the vault later, open **Settings → Cost Workbench** again and save.
 
+### Transcription and balances (optional)
+
+Live transcription in the meeting card and the **DeepSeek balance** / **voice resource pack**
+badges at the top of the panel need credentials, entered under **Settings → Cost Workbench** in
+the “Transcription and balances” card:
+
+| Field | Used for | Where to get it |
+|---|---|---|
+| Volcengine streaming API Key | live meeting transcription | Volcengine Console → Speech → App management |
+| Volcengine AccessKey / SecretKey | voice resource-pack balance | Volcengine Console → Access Control → Keys |
+| DeepSeek API Key | DeepSeek balance badge | DeepSeek Platform → API Keys |
+
+They are stored in `~/.dsh-workbench/asr.json`; the UI only shows configured / not configured and
+never echoes secrets. You can also edit that file directly. Leave a configured field blank to keep
+it; press “Clear” next to it to remove it.
+
+**Nothing else breaks without them**: library, the three tables, the calculator, glossary and search
+all work; only transcription is unavailable and the badges stay hidden. The badges live in the
+workbench panel's top toolbar, next to the refresh button.
+
 If that vault does not exist yet, run the seed script first (it is idempotent — existing files are
 skipped, never overwritten):
 
