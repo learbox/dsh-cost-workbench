@@ -64,8 +64,7 @@ GET    /vendor?name=mermaid.min.js|highlight.min.js   按需下发 vendor 脚本
 GET    /context/status?sessionId=   只读查询工作区标记（none / project / plain）
 POST   /context                     解析会话工作区并重建（sessionId 为空 = 回退公共库）
 POST   /context/mark { enable }     写当前会话工作区的标记：true=造价项目（初始化目录）/ false=普通工作区
-POST   /project/mark { path, enable }  对任意已存在目录写标记并初始化（设置页「新建造价项目工作区」用，
-                                    客户端先经 ctx.workspaces.create 把它加进 DSH 工作区列表）
+POST   /project/mark { path, enable }  对任意已存在目录写标记并初始化（当前无 UI 调用者，保留给脚本/后续入口）
 ```
 
 识别到项目后会调用 `ensureProjectLayout()` 幂等创建 `造价工作台/`、`会议记录/` 与缺失的空表；
