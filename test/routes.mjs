@@ -293,6 +293,10 @@ try {
   const ctxNone = await call('POST', '/context', { sessionId: 'session-test-2' })
   check('未标记工作区 marked=none', ctxNone.status === 200 && ctxNone.json.marked === 'none' && ctxNone.json.project === '', ctxNone.raw.slice(0, 160))
   check('未标记工作区不写造价目录', await access(join(otherDir, '造价工作台')).then(() => false, () => true))
+  const noneSop = await call('GET', '/sop')
+  const nonePaths = Array.isArray(noneSop.json.notes) ? noneSop.json.notes.map((note) => note.path) : []
+  check('普通工作区资料库只显示公共库一份', nonePaths.length === new Set(nonePaths).size && nonePaths.every((path) => path.startsWith('@public/')), JSON.stringify(nonePaths))
+  check('普通工作区树只有公共资料库一个根', Array.isArray(noneSop.json.tree) && noneSop.json.tree.length === 1 && noneSop.json.tree[0].name === '公共资料库', JSON.stringify((noneSop.json.tree ?? []).map((node) => node.name)))
 
   // 第一次询问选「普通工作区」：写标记 plain，不写目录
   const markPlain = await call('POST', '/context/mark', { enable: false })

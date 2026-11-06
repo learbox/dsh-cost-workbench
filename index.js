@@ -958,25 +958,28 @@ export function apply(ctx, config) {
     const projectMatches = query === '' ? [] : await vault.search(query)
     const publicMatches = query === '' ? [] : await publicVault.search(query)
     const tree = query === '' ? await vault.tree() : null
-    const notes = [
-      ...found.notes,
-      ...publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path })),
-    ]
-    const publicTree = query === '' ? await publicVault.tree() : null
-    const projectContainer = query === ''
+    // 项目模式：项目笔记（无前缀）+ 公共笔记（@public 前缀）；普通工作区：只有公共库一份
+    const isProjectMode = stores.project !== ''
+    const notes = isProjectMode
       ? [
-          {
-            type: 'dir',
-            name: '项目资料库',
-            path: '@project',
-            children: tree ?? [],
-            count: found.notes.length,
-          },
+          ...found.notes,
+          ...publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path })),
         ]
-      : []
+      : publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path }))
+    const publicTree = query === '' ? await publicVault.tree() : null
     const mergedTree = query === ''
       ? [
-          ...(stores.project === '' ? (tree ?? []) : projectContainer),
+          ...(isProjectMode
+            ? [
+                {
+                  type: 'dir',
+                  name: '项目资料库',
+                  path: '@project',
+                  children: tree ?? [],
+                  count: found.notes.length,
+                },
+              ]
+            : []),
           {
             type: 'dir',
             name: '公共资料库',
@@ -986,10 +989,12 @@ export function apply(ctx, config) {
           },
         ]
       : null
-    const matches = [
-      ...projectMatches,
-      ...publicMatches.map((match) => ({ ...match, path: PUBLIC_PREFIX + match.path })),
-    ]
+    const matches = isProjectMode
+      ? [
+          ...projectMatches,
+          ...publicMatches.map((match) => ({ ...match, path: PUBLIC_PREFIX + match.path })),
+        ]
+      : publicMatches.map((match) => ({ ...match, path: PUBLIC_PREFIX + match.path }))
     return {
       ok: true,
       source: found.source,

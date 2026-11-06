@@ -1751,7 +1751,7 @@ const WB_CALC = {
             })
           } else {
             void syncCostLayout()
-            setInterval(() => { void syncCostLayout() }, 5000)
+            if (typeof setInterval === 'function') setInterval(() => { void syncCostLayout() }, 5000)
           }
         } catch (error) {
           console.warn('[dsh-workbench] 造价工作区布局同步启动失败：', error instanceof Error ? error.message : String(error))
