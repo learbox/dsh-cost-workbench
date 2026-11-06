@@ -1857,6 +1857,50 @@ const WB_CALC = {
           // 没有 window 就算了
         }
 
+        /** 会话头部的 DeepSeek 余额角标（账号余额优先，API Key 回退）。 */
+        function HeaderUsageBadge() {
+          const [balance, setBalance] = React.useState(null)
+          React.useEffect(() => {
+            let alive = true
+            const load = async () => {
+              const account = await readAccountBalance()
+              if (!alive) return
+              if (account !== null) {
+                setBalance(account)
+                return
+              }
+              try {
+                const data = await api('/usage')
+                if (!alive) return
+                const deepseek = data !== null && data.deepseek !== undefined ? data.deepseek : null
+                setBalance(deepseek !== null && deepseek.configured === true ? deepseek : null)
+              } catch {
+                if (alive) setBalance(null)
+              }
+            }
+            void load()
+            const timer = setInterval(() => { void load() }, 60000)
+            return () => { alive = false; clearInterval(timer) }
+          }, [])
+          if (balance === null || balance.configured !== true || balance.error !== undefined) return null
+          const total = Number(balance.total)
+          if (!Number.isFinite(total)) return null
+          const symbol = balance.currency === 'USD' ? '$' : '¥'
+          return h('button', {
+            type: 'button',
+            title: 'DeepSeek 账户余额（账号登录态）',
+            style: {
+              display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+              borderRadius: '999px', border: '1px solid var(--dsw-alias-border-l1)',
+              background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)',
+              fontSize: '12px', lineHeight: '18px', cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0,
+            },
+          },
+            h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'DeepSeek'),
+            h('b', null, symbol + total.toFixed(2)),
+          )
+        }
+
         ctx.slots.inject('conversation.session.header.actions', () => {
           try {
             return ctx.slots.register(
@@ -1865,6 +1909,19 @@ const WB_CALC = {
             )
           } catch (error) {
             console.warn('[dsh-workbench] 会话头部按钮注册失败：', error instanceof Error ? error.message : String(error))
+            return () => {}
+          }
+        })
+
+        // 余额角标放到会话头部（中间区域），不占右侧工作台面板
+        ctx.slots.inject('conversation.session.header.actions', () => {
+          try {
+            return ctx.slots.register(
+              { name: 'conversation.session.header.actions', id: 'dsh-workbench-usage', order: 14 },
+              HeaderUsageBadge,
+            )
+          } catch (error) {
+            console.warn('[dsh-workbench] 余额角标注册失败：', error instanceof Error ? error.message : String(error))
             return () => {}
           }
         })
@@ -2193,21 +2250,6 @@ const WB_CALC = {
                 ? projectInfo.project
                 : '公共库')),
             ),
-            usage.deepseek !== null && usage.deepseek.configured === true
-              ? h('button', {
-                  type: 'button',
-                  className: 'dsh-wb-badge-btn',
-                  'data-state': usage.deepseek.error !== undefined ? 'error' : (pricing.peak ? 'peak' : 'valley'),
-                },
-                  h('span', null, 'DeepSeek'),
-                  h('b', null, usage.deepseek.error !== undefined ? '—' : (usage.deepseek.currency === 'USD' ? '$' : '¥') + Number(usage.deepseek.total).toFixed(2)),
-                  usage.deepseek.error === undefined
-                    ? h('span', { className: 'dsh-wb-tip' },
-                        pricing.label + ' · 工作日 9–12 / 14–18 为峰价'
-                        + (pricing.next === '' ? '' : ' · 下次切换 ' + pricing.next))
-                    : null,
-                )
-              : null,
             usage.volc !== null && usage.volc.configured === true
               ? h('button', {
                   type: 'button',
