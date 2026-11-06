@@ -1728,9 +1728,9 @@ const WB_CALC = {
           }, busy ? '处理中…' : '造价工作区')
         }
 
-        // 侧栏底部加「新建造价工作区」入口（可追加的 list slot；「添加工作区」按钮旁没有扩展点）
+        // 侧栏底部加「新建造价工作区」入口（可追加的 list slot；list slot 必须带 id）
         try {
-          ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action' }, FooterCostButton))
+          ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-cost-workspace' }, FooterCostButton))
         } catch (error) {
           console.warn('[dsh-workbench] 侧栏底部按钮注册失败：', error instanceof Error ? error.message : String(error))
         }
