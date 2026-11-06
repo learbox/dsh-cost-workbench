@@ -1716,20 +1716,47 @@ const WB_CALC = {
                   ? ctx.sessions.list.getSnapshot()
                   : { byId: {} }
                 const next = []
+                const PREFIX = '造价 · '
+                const renameTasks = []
+                const projectIds = []
+                const allIds = []
                 for (const workspace of Array.isArray(list) ? list : []) {
                   const path = typeof workspace?.path === 'string' ? workspace.path : ''
+                  const id = String(workspace?.workspaceId ?? workspace?.id ?? path)
+                  if (path !== '') allIds.push(id)
                   if (path === '') continue
                   const status = await api('/project/status?path=' + encodeURIComponent(path)).catch(() => null)
-                  if (status === null || status.marked !== 'project') continue
+                  const isProject = status !== null && status.marked === 'project'
+                  const rawTitle = typeof workspace?.title === 'string' && workspace.title !== '' ? workspace.title : (path.split(/[\\/]/).pop() ?? path)
+                  const bareTitle = rawTitle.startsWith(PREFIX) ? rawTitle.slice(PREFIX.length) : rawTitle
+                  if (!isProject) {
+                    if (rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: bareTitle })
+                    continue
+                  }
+                  projectIds.push(id)
+                  if (!rawTitle.startsWith(PREFIX)) renameTasks.push({ id, title: PREFIX + bareTitle })
                   const sessionIds = Array.isArray(workspace?.sessionIds) ? workspace.sessionIds : []
                   next.push({
-                    id: String(workspace.workspaceId ?? workspace.id ?? path),
+                    id,
                     path,
-                    title: typeof workspace?.title === 'string' && workspace.title !== '' ? workspace.title : (path.split(/[\\/]/).pop() ?? path),
+                    title: bareTitle,
                     sessions: sessionIds
-                      .map((id) => ({ id, title: String(sessions?.byId?.[id]?.title ?? '') }))
+                      .map((sessionId) => ({ id: sessionId, title: String(sessions?.byId?.[sessionId]?.title ?? '') }))
                       .filter((item) => item.title !== ''),
                   })
+                }
+                // 折中布局：造价工作区统一排到最后（官方列表不可分组）；标题加「造价 ·」前缀
+                if (alive && renameTasks.length > 0 && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.rename === 'function') {
+                  for (const task of renameTasks) {
+                    try { await ctx.workspaces.rename(task.id, task.title) } catch { /* 单个失败忽略 */ }
+                  }
+                }
+                const firstProject = allIds.findIndex((id) => projectIds.includes(id))
+                const lastNormal = allIds.reduce((acc, id, index) => (projectIds.includes(id) ? acc : index), -1)
+                if (alive && firstProject !== -1 && firstProject < lastNormal && ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.insertBefore === 'function') {
+                  for (const id of projectIds) {
+                    try { await ctx.workspaces.insertBefore(id, undefined) } catch { /* 单个失败忽略 */ }
+                  }
                 }
                 if (alive) setRows(next)
               } catch {
