@@ -4962,7 +4962,7 @@ function CalcCard({ t }) {
                 }),
                 h('span', null,
                   h('strong', null, '允许笔记中的原始 HTML'),
-                  h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, '（默认关闭；勾选启用时会二次确认）'),
+                  h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, '（默认关闭）'),
                 ),
               ),
               h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
