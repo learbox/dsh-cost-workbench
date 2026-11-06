@@ -19,7 +19,9 @@ lib/
   volc-asr.js      火山引擎流式 ASR 桥（sessions / chunks / finals），热词表
   iflyrec.js       讯飞本地 MCP 客户端（整文件转写）
   volc-ws.js       最小 WebSocket 客户端（需要自定义握手头）
-  usage.js         用量角标（DeepSeek 余额 + 语音剩余时长）
+  usage.js         用量角标（DeepSeek 余额 + 语音剩余时长）。DeepSeek 余额在客户端优先用账号
+                   `ctx.remote.account.getBalance()`（需 inject 'remote'/'remote.account'），
+                   API Key 查询（Host usage.js）只作为未登录时的回退。
 test/              node test/all.mjs
 locale/            zh / en 显示名
 scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数据）

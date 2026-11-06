@@ -80,7 +80,10 @@ D:\Obsidian\造价工作台
 |---|---|---|
 | 火山流式语音 API Key | 会议记录实时转写 | 火山控制台 → 语音技术 → 应用管理 |
 | 火山 AccessKey / SecretKey | 查语音资源包余额 | 火山控制台 → 访问控制 → 密钥管理 |
-| DeepSeek API Key | DeepSeek 余额角标 | DeepSeek 开放平台 → API Keys |
+| DeepSeek API Key | DeepSeek 余额角标（**可选**，仅在没登录 DSH 账号时用作回退） | DeepSeek 开放平台 → API Keys |
+
+**DeepSeek 余额优先用 DSH 账号登录态查**（官方钱包余额，账号登录即可显示，不需要 API Key）；
+只有没登录、或账号余额读取失败时，才回退到上面填的 API Key。
 
 保存后写在 `~/.dsh-workbench/asr.json`，界面只显示「已配置 / 未配置」，不回显明文、不上传；
 也可以直接编辑这个文件。已配置的字段留空表示不修改，点旁边的「清除」可以删掉。

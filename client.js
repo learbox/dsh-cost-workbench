@@ -1449,7 +1449,7 @@ const WB_CALC = {
     }
 
     return {
-      inject: ['slots', 'workspaces'],
+      inject: ['slots', 'workspaces', 'remote', 'remote.account'],
       _calc: WB_CALC,
       _md: renderMarkdown,
       apply(ctx) {
@@ -1539,6 +1539,42 @@ const WB_CALC = {
 
         /** 最近一次渲染的会话信息：快捷键呼出时用它拿到 sessionId 与输入框能力。 */
         const activeSession = { sessionId: null, panelProps: {} }
+        /**
+         * 用 DSH 账号登录态查官方钱包余额（充值钱包 + 奖金钱包）；未登录/失败返回 null。
+         * 有账号时优先用它，API Key 余额只作为回退。
+         */
+        async function readAccountBalance() {
+          try {
+            const remote = ctx.remote
+            if (remote === undefined || remote === null || remote.account === undefined || remote.account === null || typeof remote.account.getBalance !== 'function') return null
+            const version = typeof globalThis.__DSH_CLIENT_VERSION__ === 'string' && globalThis.__DSH_CLIENT_VERSION__ !== ''
+              ? globalThis.__DSH_CLIENT_VERSION__
+              : '0.2.2'
+            const locale = typeof navigator !== 'undefined' && typeof navigator.language === 'string' && navigator.language !== ''
+              ? navigator.language
+              : 'zh-CN'
+            const result = await remote.account.getBalance({
+              version,
+              locale,
+              timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+            })
+            if (result === null || typeof result !== 'object' || result.ok !== true) return null
+            const value = result.value
+            if (value === null || typeof value !== 'object' || value.status !== 'ready') return null
+            const wallets = [
+              ...(Array.isArray(value.value) ? value.value : []),
+              ...(Array.isArray(value.bonusWallets) ? value.bonusWallets : []),
+            ]
+            const main = wallets.find((wallet) => wallet !== null && typeof wallet === 'object' && wallet.currency === 'CNY')
+              ?? wallets.find((wallet) => wallet !== null && typeof wallet === 'object')
+            if (main === undefined || main === null) return null
+            const total = Number(main.balance)
+            if (!Number.isFinite(total)) return null
+            return { configured: true, total, currency: String(main.currency ?? 'CNY'), source: 'account' }
+          } catch {
+            return null
+          }
+        }
 
         /** shell.overlay 的宿主组件。 */
         function FullWorkbenchHost() {
@@ -1919,7 +1955,10 @@ const WB_CALC = {
           /** 消费之后强制取一次用量（平时不轮询）。 */
           const refreshUsage = React.useCallback(() => {
             api('/usage?refresh=1').then(
-              (data) => setUsage({ deepseek: data.deepseek ?? null, volc: data.volc ?? null }),
+              async (data) => {
+                const account = await readAccountBalance()
+                setUsage({ deepseek: account !== null ? account : (data.deepseek ?? null), volc: data.volc ?? null })
+              },
               () => {},
             )
           }, [])
@@ -2033,7 +2072,10 @@ const WB_CALC = {
               () => { if (alive) setPrompts({}) },
             )
             api('/usage').then(
-              (data) => { if (alive) setUsage({ deepseek: data.deepseek ?? null, volc: data.volc ?? null }) },
+              async (data) => {
+                const account = await readAccountBalance()
+                if (alive) setUsage({ deepseek: account !== null ? account : (data.deepseek ?? null), volc: data.volc ?? null })
+              },
               () => { if (alive) setUsage({ deepseek: null, volc: null }) },
             )
             return () => { alive = false }
@@ -2158,7 +2200,7 @@ const WB_CALC = {
                   'data-state': usage.deepseek.error !== undefined ? 'error' : (pricing.peak ? 'peak' : 'valley'),
                 },
                   h('span', null, 'DeepSeek'),
-                  h('b', null, usage.deepseek.error !== undefined ? '—' : '¥' + Number(usage.deepseek.total).toFixed(2)),
+                  h('b', null, usage.deepseek.error !== undefined ? '—' : (usage.deepseek.currency === 'USD' ? '$' : '¥') + Number(usage.deepseek.total).toFixed(2)),
                   usage.deepseek.error === undefined
                     ? h('span', { className: 'dsh-wb-tip' },
                         pricing.label + ' · 工作日 9–12 / 14–18 为峰价'
