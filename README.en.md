@@ -173,28 +173,22 @@ It writes to the composer and never sends. If there is already a draft, it asks 
 - To avoid clobbering: a save compares against the version you read. If the file changed elsewhere,
   it refuses to write and offers **reload** or **overwrite anyway**. A backup is kept before each save.
 
-## Projects (per-project folders)
+## Project = the current session workspace
 
-Variations, material prices, pricing basis, library notes and meeting recordings are stored **per
-project**; the glossary stays global.
+The workbench reads the workspace bound to the current DSH session and treats it as the
+**current project**; there is nothing to pick manually:
 
-- The **Project** selector at the left of the panel toolbar defaults to “Public library”; picking a
-  project switches those cards to that project's folder
-- The `＋` button creates a project (name it like a job, e.g. a school tender control price); it
-  creates the folder layout and empty tables for you
-- Project layout:
+- Library = the workspace itself (markdown notes in the project folder)
+- Variations / material prices / pricing basis → `<workspace>\造价工作台\`
+- Meeting recordings → `<workspace>\会议记录\`
+- Glossary and prompt templates → the “public library” configured in Settings (shared by projects)
 
-```
-<vault>/项目/<project>/
-├─ Workbench\变更签证台账.md, 材料价格.md, 计价依据.md
-├─ 00 资料库\            ← project-only notes
-└─ 会议记录\
-```
+The panel toolbar shows the current project name (the workspace folder name). Switching
+session/workspace in DSH switches the workbench automatically.
 
-- “Public library” keeps the original global tables for shared material; projects never mix into it
-- The glossary always lives at `<vault>/Workbench/术语表.md` and is shared by every project
-- Switching a project also switches cards, search and recordings; the choice is stored in
-  `~/.dsh-workbench/config.json` as `currentProject`
+Usage: add a project folder as a DSH workspace, e.g.
+`E:\文档\learbox的工作空间\2018年工作文件\华远售楼处`, then open the workbench in a session of
+that workspace — data is written into that project folder, next to the BOQ and tender files.
 
 ## Where things live
 

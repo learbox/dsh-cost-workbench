@@ -97,6 +97,8 @@ try {
     glossaryFile,
     // 隔离真实用户配置：否则 ~/.dsh-workbench/config.json 会覆盖测试的临时库路径
     userConfigFile: join(tmp.dir, 'user-config.json'),
+    // 会话-工作区索引：测试用临时文件，避免读真实 DSH 存储
+    workspaceIndexFile: join(tmp.dir, 'workspace-index.json'),
     // 故意给一个不存在的打开命令：验证 open_failed 分支，同时避免测试真的去拉起 Obsidian。
     openCommand: '__missing_open_command__',
     // 同理：文件夹选择器用不存在的命令，避免测试弹出系统对话框。
@@ -170,28 +172,30 @@ try {
   check('变更签证新增 200', changeAdded.status === 200)
   check('变更签证删除 200', (await call('DELETE', '/changes/' + changeAdded.json.entry.id)).status === 200)
 
-  /* ---------------------------------------------------------- 项目维度 */
-  const projectsBefore = await call('GET', '/projects')
-  check('项目列表初始为空', projectsBefore.status === 200 && projectsBefore.json.projects.length === 0)
-  const createdProject = await call('POST', '/projects', { name: '测试项目A' })
-  check('新建项目 200', createdProject.status === 200, createdProject.raw.slice(0, 120))
-  check('新建项目写入空表', await readFile(join(vaultRoot, '项目', '测试项目A', 'Workbench', '计价依据.md'), 'utf8').then((text) => text.includes('# 计价依据速查'), () => false))
-  check('新建项目建好资料库与会议记录目录', await access(join(vaultRoot, '项目', '测试项目A', '00 资料库')).then(() => true, () => false))
-  const projectsAfter = await call('GET', '/projects')
-  check('项目列表含新项目', projectsAfter.json.projects.includes('测试项目A'))
-  const switched = await call('PUT', '/projects/current', { name: '测试项目A' })
-  check('切换项目 200', switched.status === 200 && switched.json.currentProject === '测试项目A', switched.raw.slice(0, 160))
+  /* ---------------------------------------------- 会话工作区 = 项目根 */
+  const projectDir = join(tmp.dir, '项目工作区')
+  await mkdir(projectDir, { recursive: true })
+  await writeFile(join(tmp.dir, 'workspace-index.json'), JSON.stringify({
+    tables: { workspaces: { w1: { path: projectDir, sessionIds: ['session-test-1'] } } },
+  }), 'utf8')
+
+  const ctxOn = await call('POST', '/context', { sessionId: 'session-test-1' })
+  check('识别会话工作区为项目根', ctxOn.status === 200 && ctxOn.json.projectRoot === projectDir, ctxOn.raw.slice(0, 160))
+  check('项目名取工作区文件夹名', ctxOn.json.project === '项目工作区')
   const projectStandards = await call('GET', '/standards')
-  check('切换后读到项目自己的空表', projectStandards.status === 200 && projectStandards.json.entries.length === 0)
-  const projectAdd = await call('POST', '/standards', { code: 'P-001', name: '项目专用计价依据', category: '项目', version: 'v1', date: '', note: '' })
+  check('项目内读到空表', projectStandards.status === 200 && projectStandards.json.entries.length === 0)
+  const projectAdd = await call('POST', '/standards', { code: 'W-001', name: '项目专用计价依据', category: '项目', version: 'v1', date: '', note: '' })
   check('项目内可新增', projectAdd.status === 200)
-  check('项目数据落在项目目录', await readFile(join(vaultRoot, '项目', '测试项目A', 'Workbench', '计价依据.md'), 'utf8').then((text) => text.includes('P-001'), () => false))
-  const backToPublic = await call('PUT', '/projects/current', { name: '' })
-  check('切回公共库', backToPublic.status === 200 && backToPublic.json.currentProject === '')
+  check('项目数据落在会话工作区', await readFile(join(projectDir, '造价工作台', '计价依据.md'), 'utf8').then((text) => text.includes('W-001'), () => false))
+  const projectSop = await call('GET', '/sop')
+  check('资料库=项目根（含造价工作台目录）', projectSop.status === 200 && Array.isArray(projectSop.json.tree) && projectSop.json.tree.some((node) => node.type === 'dir' && node.name === '造价工作台'), projectSop.raw.slice(0, 160))
+  const projectRecording = await call('GET', '/recordings')
+  check('会议记录指向项目目录', projectRecording.status === 200 && projectRecording.json.dir === join(projectDir, '会议记录'), projectRecording.json.dir)
+
+  const ctxOff = await call('POST', '/context', { sessionId: '' })
+  check('清空会话后回退公共库', ctxOff.status === 200 && ctxOff.json.project === '')
   const publicStandards = await call('GET', '/standards')
-  check('公共库原数据未受影响', publicStandards.json.entries.some((entry) => entry.code === 'GB50500'))
-  check('非法项目名被拒', (await call('POST', '/projects', { name: '../x' })).status === 400)
-  check('切换不存在项目 404', (await call('PUT', '/projects/current', { name: '不存在' })).status === 404)
+  check('公共库数据未受影响', publicStandards.json.entries.some((entry) => entry.code === 'GB50500'))
 
   const stdSearch = await call('GET', '/search?q=' + encodeURIComponent('GB50500'))
   check('搜索命中计价依据', stdSearch.json.hits.some((hit) => hit.source === 'standards'), JSON.stringify(stdSearch.json.counts))

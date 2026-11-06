@@ -25,25 +25,32 @@ locale/            zh / en 显示名
 scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数据）
 ```
 
-数据：笔记、录音、三张表、术语表都在用户的 Obsidian vault 里；`cards.json`、`prompts.json`、
-`config.json`、可选的 `asr.json` 在 `~/.dsh-workbench/`。
+数据：项目数据（资料库笔记、会议记录、三张表）跟在 DSH 会话的工作区里；公共资料库（术语表、
+提示词模板）在配置的 vault 里；`cards.json`、`prompts.json`、`config.json`、可选的 `asr.json` 在
+`~/.dsh-workbench/`。
 
 设置页（`settings.section`）同一页管理两件事：vault 路径/子目录（`/config`）与语音凭据
 （`/credentials`，读 `asr.json`，响应只给「已配置」布尔值，绝不回显明文；显式清除走 `clear` 数组）。
 
-## 项目上下文（按项目分目录）
+## 项目上下文（会话工作区 = 项目根）
 
-`currentProject` 非空时，`buildStores(settings)` 把三张表、资料库、会议记录都切到
-`<vault>/项目/<项目名>/`；术语表仍读全局 `Workbench/术语表.md`。项目列表来自扫描 `项目/` 子目录；
-新建项目写入空表（`serialize([])`）与 `00 资料库/项目说明.md`。切换项目 = 写 `config.json` 的
-`currentProject` + `rebuild()`，与保存库配置同一套「原地重建」语义。
+客户端打开面板时 `POST /context { sessionId }`；Host 读 `~/.dsh/storages/workspace.json`
+（可用 `workspaceIndexFile` 覆盖，测试用），把该会话绑定的工作区路径当作项目根，
+然后 `rebuild()`：
+
+- `vaultRoot = 项目根`，`sopDir = ''`（资料库就是项目文件夹本身）
+- 三张表 → `<项目根>/造价工作台/`
+- 会议记录 → `<项目根>/会议记录/`
+- 术语表仍是公共库的 `Workbench/术语表.md`（`vaultRoot` 配置只影响公共资料）
+- 没有会话工作区（空 sessionId / 索引里找不到）→ 回退公共库旧布局
+
+项目切换不落盘（不写 config.json）：每次面板打开/会话变化重新解析，因此多个会话各自
+跟随自己的工作区。改这里的路径派生逻辑时，`buildStores()` 是唯一入口。
 
 相关路由：
 
 ```
-GET    /projects           项目列表（扫描 <vault>/项目/）
-POST   /projects           新建项目（建 Workbench / 00 资料库 / 会议记录 + 空表）
-PUT    /projects/current   切换当前项目（name 为空串 = 公共库）
+POST   /context            解析会话工作区并重建（sessionId 为空 = 回退公共库）
 ```
 
 ## 造价三张表：CRUD 机制
@@ -132,7 +139,7 @@ patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已�
 |---|---|
 | `cards.json` / `prompts.json` / 术语表 / 三张表 / 笔记 | 刷新页面（每次请求都读盘） |
 | 双模式切换 | 立即（localStorage） |
-| 切换 / 新建项目 | 立即（写 currentProject + 原地重建） |
+| 切换会话 / 工作区 | 立即（面板重新 POST /context 并重建） |
 | 设置 → 造价工作台里保存配置 | 立即（Host 原地重建，不用重启） |
 | `client.js` | 重启 DSH（打包版没有热重载快捷键） |
 | `index.js` / `lib/*` | 重启 DSH |

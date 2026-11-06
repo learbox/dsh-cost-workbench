@@ -1587,9 +1587,7 @@ const WB_CALC = {
           const [setupDraft, setSetupDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '' })
           const [setupBusy, setSetupBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
-          const [projects, setProjects] = React.useState([])
-          const [currentProject, setCurrentProject] = React.useState('')
-          const [projectBusy, setProjectBusy] = React.useState(false)
+          const [projectInfo, setProjectInfo] = React.useState(null)
           React.useEffect(() => {
             let alive = true
             api('/config').then(
@@ -1605,16 +1603,17 @@ const WB_CALC = {
 
           React.useEffect(() => {
             let alive = true
-            api('/projects').then(
+            const id = typeof props.sessionId === 'string' ? props.sessionId : ''
+            api('/context', { method: 'POST', body: { sessionId: id } }).then(
               (data) => {
                 if (!alive) return
-                setProjects(Array.isArray(data.projects) ? data.projects : [])
-                setCurrentProject(typeof data.current === 'string' ? data.current : '')
+                setProjectInfo(data)
+                setReloadKey((value) => value + 1)
               },
-              () => {},
+              () => { if (alive) setProjectInfo(null) },
             )
             return () => { alive = false }
-          }, [reloadKey])
+          }, [props.sessionId])
 
           React.useEffect(() => {
             let alive = true
@@ -1712,38 +1711,6 @@ const WB_CALC = {
             setPending({ text, label, length: draft.length })
           }
 
-          function switchProject(name) {
-            if (projectBusy) return
-            setProjectBusy(true)
-            api('/projects/current', { method: 'PUT', body: { name } }).then(
-              (data) => {
-                setCurrentProject(typeof data.currentProject === 'string' ? data.currentProject : name)
-                setFlash(name === '' ? '已切回公共库' : '已切换到项目：' + name)
-                setReloadKey((value) => value + 1)
-              },
-              (error) => setFlash('切换项目失败：' + error.message),
-            ).finally(() => setProjectBusy(false))
-          }
-
-          function createProject() {
-            if (projectBusy) return
-            const input = typeof window.prompt === 'function' ? window.prompt('新项目名称（例如：赫山中学招标控制价）') : null
-            if (input === null) return
-            const name = String(input).trim()
-            if (name === '') return
-            setProjectBusy(true)
-            api('/projects', { method: 'POST', body: { name } }).then(
-              () => api('/projects/current', { method: 'PUT', body: { name } }),
-            ).then(
-              (data) => {
-                setCurrentProject(typeof data.currentProject === 'string' ? data.currentProject : name)
-                setFlash('已创建并切换到项目：' + name)
-                setReloadKey((value) => value + 1)
-              },
-              (error) => setFlash('新建项目失败：' + error.message),
-            ).finally(() => setProjectBusy(false))
-          }
-
           function insertPrompt(promptId) {
             const prompt = prompts[promptId]
             if (prompt === undefined) {
@@ -1772,23 +1739,21 @@ const WB_CALC = {
 
           const head = h('div', { className: 'dsh-wb-toolbar' },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px', marginRight: 'auto', minWidth: '0' } },
-              h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, '项目'),
-              h('select', {
-                className: 'dsh-wb-input dsh-wb-select',
-                style: { width: 'auto', maxWidth: '170px', height: '24px', flex: '0 1 auto' },
-                value: currentProject,
-                disabled: projectBusy,
-                title: '项目相关的表、资料库与会议记录都跟着切换；术语表始终全局',
-                onChange: (event) => switchProject(event.target.value),
-              },
-                h('option', { value: '' }, '公共库'),
-                projects.map((name) => h('option', { key: name, value: name }, name)),
-              ),
-              h('button', {
-                type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet',
-                disabled: projectBusy, title: '新建项目', 'aria-label': '新建项目',
-                onClick: createProject,
-              }, '＋'),
+              h('span', {
+                style: {
+                  fontSize: '12px',
+                  color: 'var(--dsw-alias-label-secondary)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: '260px',
+                },
+                title: projectInfo !== null && typeof projectInfo.projectRoot === 'string' && projectInfo.projectRoot !== ''
+                  ? '项目目录：' + projectInfo.projectRoot
+                  : '未识别到会话工作区，使用公共库',
+              }, '项目：' + (projectInfo !== null && typeof projectInfo.project === 'string' && projectInfo.project !== ''
+                ? projectInfo.project
+                : '公共库')),
             ),
             usage.deepseek !== null && usage.deepseek.configured === true
               ? h('button', {
@@ -2014,13 +1979,13 @@ const WB_CALC = {
               h('div', { className: 'dsh-wb-head' },
                 h('div', null,
                   h('h2', null, '先配置一下'),
-                  h('div', { className: 'dsh-wb-sub' }, '工作台读写一个文件夹里的 Markdown 笔记。选一次，以后不用再管。'),
+                  h('div', { className: 'dsh-wb-sub' }, '先配置公共资料库（术语表/模板）。项目数据会跟随当前 DSH 会话的工作区自动存放。'),
                 ),
               ),
               h('div', { className: 'dsh-wb-body' },
                 flash !== null ? h('div', { className: 'dsh-wb-error' }, flash) : null,
                 h('div', { className: 'dsh-wb-card' },
-                  h('div', { className: 'dsh-wb-note' }, '笔记文件夹的完整路径（Obsidian 库，或任意文件夹都可以）'),
+                  h('div', { className: 'dsh-wb-note' }, '公共资料库路径（Obsidian 库或任意文件夹；术语表/模板放这里）'),
                   h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px' } },
                     h('input', {
                       className: 'dsh-wb-input', style: { flex: '1 1 auto', minWidth: '0' },
@@ -2664,8 +2629,10 @@ function CalcCard({ t }) {
             setBusy(true)
             const isCreate = editor.mode === 'create'
             const folder = String(editor.folder ?? '').trim() === '' ? String(vault.sopDir ?? '') : String(editor.folder)
+            const base = folder.replace(/^\/+|\/+$/g, '')
+            const fileName = String(editor.name ?? '').trim().replace(/\.md$/i, '').replace(/^\/+/, '')
             const path = isCreate
-              ? folder.replace(/^\/+|\/+$/g, '') + '/' + String(editor.name ?? '').trim().replace(/\.md$/i, '').replace(/^\/+/, '') + '.md'
+              ? (base === '' ? fileName + '.md' : base + '/' + fileName + '.md')
               : editor.path
             const request = isCreate
               ? api('/sop/note', { method: 'POST', body: { path, text: editor.text } })
@@ -2705,7 +2672,7 @@ function CalcCard({ t }) {
               if (node.count > 0) {
                 folders.push({
                   label: '\u3000'.repeat(depth) + node.name,
-                  value: sopBase + '/' + node.path,
+                  value: sopBase === '' ? node.path : sopBase + '/' + node.path,
                   depth,
                 })
               }
@@ -4411,11 +4378,11 @@ function CalcCard({ t }) {
               h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, '会话右侧栏的资料库与造价工具'),
             ),
             h('p', { className: 'dsh-wb-note', style: { marginTop: '6px' } },
-              '这里配置工作台读写哪个 Obsidian 库。保存后立即生效，不需要重启；会话里首次打开工作台时也会先问一次。'),
+              '公共资料库用来放术语表与提示词模板（跨项目共用）。变更签证、材料价格、计价依据、会议记录会自动跟随当前会话的工作区，不在这里配置。'),
             flash !== null ? h('div', { className: 'dsh-wb-error', style: { marginTop: '10px' } }, flash) : null,
             h('div', { className: 'dsh-wb-card', style: { marginTop: '12px', padding: '14px 16px' } },
               field(
-                '笔记文件夹的完整路径（Obsidian 库，或任意文件夹）',
+                '公共资料库路径（Obsidian 库或任意文件夹；术语表/模板放这里）',
                 draft.vaultRoot,
                 (value) => setDraft((current) => ({ ...current, vaultRoot: value })),
                 h('button', {
