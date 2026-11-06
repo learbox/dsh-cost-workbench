@@ -1183,6 +1183,36 @@ export function apply(ctx, config) {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
         return writeJson(res, 200, { ok: true, ...(await readPrompts(settings.promptsFile)) })
       }
+      /* ------------------------------------------------------ Obsidian 库状态 */
+      if (route === '/obsidian-status') {
+        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const registered = await isVaultRegistered(stores.projectRoot, settings.obsidianIndexFile)
+        return writeJson(res, 200, { ok: true, registered, project: stores.project, projectRoot: stores.projectRoot })
+      }
+
+      if (route === '/open-obsidian-app') {
+        if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
+        // 直接启动 Obsidian（Windows 读注册表拿 exe），让用户去「打开文件夹作为库」
+        if (process.platform === 'win32') {
+          const handler = await readProtocolCommand('obsidian')
+          if (handler !== null) {
+            await new Promise((resolve, reject) => {
+              try {
+                execFile(handler.exe, [], { timeout: 8000, windowsHide: true }, (error) => {
+                  if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+                  else resolve()
+                })
+              } catch (error) {
+                reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+              }
+            })
+            return writeJson(res, 200, { ok: true })
+          }
+        }
+        await openExternal(settings.openCommand, 'obsidian://open')
+        return writeJson(res, 200, { ok: true })
+      }
+
       if (route === '/open-obsidian') {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
         const body = await readJsonBody(req)

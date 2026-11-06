@@ -195,6 +195,12 @@ try {
   const projectRecording = await call('GET', '/recordings')
   check('会议记录指向项目目录', projectRecording.status === 200 && projectRecording.json.dir === join(projectDir, '会议记录'), projectRecording.json.dir)
 
+  const obsBefore = await call('GET', '/obsidian-status')
+  check('项目文件夹未注册为 Obsidian 库', obsBefore.status === 200 && obsBefore.json.registered === false)
+  await writeFile(join(tmp.dir, 'obsidian.json'), JSON.stringify({ vaults: { abc123: { path: projectDir } } }), 'utf8')
+  const obsAfter = await call('GET', '/obsidian-status')
+  check('注册后识别为 Obsidian 库', obsAfter.status === 200 && obsAfter.json.registered === true)
+
   const ctxOff = await call('POST', '/context', { sessionId: '' })
   check('清空会话后回退公共库', ctxOff.status === 200 && ctxOff.json.project === '')
   const publicStandards = await call('GET', '/standards')

@@ -1588,6 +1588,8 @@ const WB_CALC = {
           const [setupBusy, setSetupBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
           const [projectInfo, setProjectInfo] = React.useState(null)
+          const [obsidianStatus, setObsidianStatus] = React.useState(null)
+          const [registerHelp, setRegisterHelp] = React.useState(false)
           React.useEffect(() => {
             let alive = true
             api('/config').then(
@@ -1614,6 +1616,15 @@ const WB_CALC = {
             )
             return () => { alive = false }
           }, [props.sessionId])
+
+          React.useEffect(() => {
+            let alive = true
+            api('/obsidian-status').then(
+              (data) => { if (alive) setObsidianStatus(data) },
+              () => { if (alive) setObsidianStatus(null) },
+            )
+            return () => { alive = false }
+          }, [reloadKey])
 
           React.useEffect(() => {
             let alive = true
@@ -1919,7 +1930,7 @@ const WB_CALC = {
             )
           } else if (activeCard !== null && mode === 'cost') {
             const shared = { key: activeCard.id, card: activeCard, t, requestInsert, insertPrompt, prompts, setFlash, vault, insertNote, focusMode, setFocusMode, onUsageChanged: refreshUsage, refreshTick, ...(activeCard.kind === 'recorder' ? { focusRecording, onRecordingHandled: () => setFocusRecording(null) } : {}) }
-            if (activeCard.kind === 'sop') body = h(SopCard, { ...shared, focusNote, onFocusHandled: () => setFocusNote(null) })
+            if (activeCard.kind === 'sop') body = h(SopCard, { ...shared, focusNote, onFocusHandled: () => setFocusNote(null), obsidianStatus, onNeedRegister: () => setRegisterHelp(true) })
             else if (activeCard.kind === 'standards' || activeCard.kind === 'prices' || activeCard.kind === 'changes') body = h(TableCard, shared)
             else if (activeCard.kind === 'calc') body = h(CalcCard, shared)
             else if (activeCard.kind === 'recorder') body = h(RecorderCard, shared)
@@ -2040,6 +2051,48 @@ const WB_CALC = {
                         '没有可显示的卡片：检查 ' + (state.cardsFile ?? 'cards.json') + ' 是否存在且格式正确。')
                     : body,
               ),
+              registerHelp ? h('div', { className: 'dsh-wb-modal-backdrop', onClick: () => setRegisterHelp(false) },
+                h('div', { className: 'dsh-wb-modal', style: { width: '460px', maxWidth: '92vw' }, onClick: (event) => event.stopPropagation() },
+                  h('div', { className: 'dsh-wb-modal-title' }, '把这个项目添加为 Obsidian 库'),
+                  h('p', { className: 'dsh-wb-note' }, 'Obsidian 只能打开已注册的库。把当前项目文件夹添加一次，之后「打开」就会直接跳到 Obsidian。'),
+                  h('div', { className: 'dsh-wb-pre', style: { maxHeight: 'none', marginTop: '8px' } },
+                    projectInfo !== null && typeof projectInfo.projectRoot === 'string' && projectInfo.projectRoot !== '' ? projectInfo.projectRoot : '（项目路径读取中）'),
+                  h('ol', { className: 'dsh-wb-note', style: { lineHeight: '1.9', paddingLeft: '20px', marginTop: '8px' } },
+                    h('li', null, '点下面的「打开 Obsidian」'),
+                    h('li', null, '左下角「打开其他仓库」→「打开文件夹作为库」'),
+                    h('li', null, '选择上面的路径并打开'),
+                    h('li', null, '回到这里点「重新检测」'),
+                  ),
+                  h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end', marginTop: '14px' } },
+                    h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => {
+                      const target = projectInfo !== null && typeof projectInfo.projectRoot === 'string' ? projectInfo.projectRoot : ''
+                      if (target === '') { setFlash('还没有识别到项目路径'); return }
+                      copyText(target).then((ok) => setFlash(ok ? '路径已复制' : '复制失败'), () => setFlash('复制失败'))
+                    } }, '复制路径'),
+                    h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => {
+                      api('/open-obsidian-app', { method: 'POST', body: {} }).then(
+                        () => setFlash('已打开 Obsidian'),
+                        (error) => setFlash('打开 Obsidian 失败：' + error.message),
+                      )
+                    } }, '打开 Obsidian'),
+                    h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => {
+                      api('/obsidian-status').then(
+                        (data) => {
+                          setObsidianStatus(data)
+                          if (data.registered === true) {
+                            setRegisterHelp(false)
+                            setFlash('已识别为 Obsidian 库，现在可以点「打开」了')
+                          } else {
+                            setFlash('还没检测到该库，确认已在 Obsidian 里添加后重试')
+                          }
+                        },
+                        (error) => setFlash('检测失败：' + error.message),
+                      )
+                    } }, '重新检测'),
+                    h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => setRegisterHelp(false) }, '关闭'),
+                  ),
+                ),
+              ) : null,
               bar,
             )
           } catch (error) {
@@ -2502,7 +2555,7 @@ function CalcCard({ t }) {
   )
 }
 
-        function SopCard({ card, t, requestInsert, setFlash, vault, focusNote, onFocusHandled, focusMode, setFocusMode, refreshTick = 0 }) {
+        function SopCard({ card, t, requestInsert, setFlash, vault, focusNote, onFocusHandled, focusMode, setFocusMode, refreshTick = 0, obsidianStatus, onNeedRegister }) {
           const [state, setState] = React.useState({ status: 'loading' })
           const [doc, setDoc] = React.useState(null)
           const [editor, setEditor] = React.useState(null)
@@ -2614,7 +2667,8 @@ function CalcCard({ t }) {
             api('/open-obsidian', { method: 'POST', body: { path } }).then(
               (data) => {
                 if (data !== null && data.mode === 'file') {
-                  setFlash('该项目文件夹还不是 Obsidian 库，已用系统默认程序打开；想用 Obsidian 请先把它添加为库')
+                  setFlash('该项目文件夹还不是 Obsidian 库，已用系统默认程序打开')
+                  if (typeof onNeedRegister === 'function') onNeedRegister()
                 } else {
                   setFlash('已在 Obsidian 打开')
                 }
@@ -2796,6 +2850,13 @@ function CalcCard({ t }) {
                         copyText(doc.text).then((ok) => setFlash(ok ? t('copy.done') : t('copy.failed')))
                       } }, t('sop.copy')),
                       h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', onClick: () => openInObsidian(doc.path) }, t('sop.open')),
+                      obsidianStatus !== null && obsidianStatus.registered !== true
+                        ? h('button', {
+                            type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet',
+                            title: '把这个项目文件夹添加为 Obsidian 库',
+                            onClick: () => { if (typeof onNeedRegister === 'function') onNeedRegister() },
+                          }, '设为库')
+                        : null,
                     ),
                   ),
                   h(MarkdownBody, { text: doc.text, t }),

@@ -163,6 +163,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 想让项目用 Obsidian 打开：Obsidian → 左下角「打开其他仓库」→「打开文件夹作为库」→ 选项目文件夹。
 库名与文件夹名不同时，到 **设置 → 造价工作台 → Obsidian 库名** 填实际库名。
 
+点「打开」时如果还不是库，面板会弹出引导：复制项目路径 → 打开 Obsidian → 打开文件夹作为库 →
+重新检测。资料库工具栏也有一个「设为库」按钮，随时可以调出这段引导。
+
 ## 项目 = 当前会话的工作区
 
 工作台读取 DSH 当前会话绑定的工作区，把它当作「当前项目」，不需要手动选项目：

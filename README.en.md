@@ -84,6 +84,10 @@ To make a project open in Obsidian: Obsidian → “Open another vault” → �
 pick the project folder. If the vault name differs from the folder name, set it under
 **Settings → Cost Workbench → Obsidian vault name**.
 
+When the project is not a vault yet, pressing **Open** shows a guide: copy the project path → open
+Obsidian → open folder as vault → re-check. The library toolbar also has a **“Make vault”** button
+that opens the same guide at any time.
+
 ### Transcription and balances (optional)
 
 Live transcription in the meeting card and the **DeepSeek balance** / **voice resource pack**
