@@ -3255,7 +3255,7 @@ function CalcCard({ t }) {
             state.status === 'loading' && stats === null ? h('div', { className: 'dsh-wb-loading' }, t('panel.loading')) : null,
             h('div', { className: 'dsh-wb-split' },
               focusMode ? null : h('div', { className: 'dsh-wb-nav' },
-                h('div', { className: 'dsh-wb-nav-title' }, vault.sopDir ?? t('sop.nav')),
+                h('div', { className: 'dsh-wb-nav-title' }, t('sop.nav')),
                 h('div', { className: 'dsh-wb-treelist' },
                   tree.length === 0 && state.status === 'ready'
                     ? h('div', { className: 'dsh-wb-note' }, t('sop.noNotes'))
