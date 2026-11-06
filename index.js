@@ -1306,6 +1306,14 @@ export function apply(ctx, config) {
         })
       }
 
+      // 只读查询：任意目录是否已标记为造价项目（侧栏「造价工作区」区块用）
+      if (route === '/project/status') {
+        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const target = (url.searchParams.get('path') ?? '').trim()
+        if (target === '' || !isAbsolutePath(target)) return writeError(res, 400, 'bad_request', '需要绝对路径')
+        return writeJson(res, 200, { ok: true, path: target, marked: await readWorkspaceMarker(target) })
+      }
+
       // 只读查询：会话对应工作区的标记状态（入口按钮用它决定显示/隐藏，不触发重建）
       if (route === '/context/status') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')

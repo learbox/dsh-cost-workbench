@@ -1420,7 +1420,7 @@ const WB_CALC = {
     }
 
     return {
-      inject: ['slots', 'workspaces'],
+      inject: ['slots', 'workspaces', 'sessions', 'uiWorkspace'],
       _calc: WB_CALC,
       _md: renderMarkdown,
       apply(ctx) {
@@ -1696,9 +1696,49 @@ const WB_CALC = {
           )
         }
 
-        /** 侧栏底部的「新建造价工作区」：选目录 → 加为 DSH 工作区 → 建目录+标记。 */
-        function FooterCostButton() {
+        /**
+         * 侧栏底部的「造价工作区」独立区块：只列出已标记为造价项目的工作区及其会话，
+         * 与官方工作区列表分开；点击会话直接打开。右上角「+」= 新建造价工作区。
+         */
+        function CostWorkspaceSection() {
+          const [rows, setRows] = React.useState([])
           const [busy, setBusy] = React.useState(false)
+          const [tick, setTick] = React.useState(0)
+          React.useEffect(() => {
+            let alive = true
+            const load = async () => {
+              try {
+                const list = ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.list?.getSnapshot === 'function'
+                  ? ctx.workspaces.list.getSnapshot()
+                  : []
+                const sessions = ctx.sessions !== undefined && ctx.sessions !== null && typeof ctx.sessions.list?.getSnapshot === 'function'
+                  ? ctx.sessions.list.getSnapshot()
+                  : { byId: {} }
+                const next = []
+                for (const workspace of Array.isArray(list) ? list : []) {
+                  const path = typeof workspace?.path === 'string' ? workspace.path : ''
+                  if (path === '') continue
+                  const status = await api('/project/status?path=' + encodeURIComponent(path)).catch(() => null)
+                  if (status === null || status.marked !== 'project') continue
+                  const sessionIds = Array.isArray(workspace?.sessionIds) ? workspace.sessionIds : []
+                  next.push({
+                    id: String(workspace.workspaceId ?? workspace.id ?? path),
+                    path,
+                    title: typeof workspace?.title === 'string' && workspace.title !== '' ? workspace.title : (path.split(/[\\/]/).pop() ?? path),
+                    sessions: sessionIds
+                      .map((id) => ({ id, title: String(sessions?.byId?.[id]?.title ?? '') }))
+                      .filter((item) => item.title !== ''),
+                  })
+                }
+                if (alive) setRows(next)
+              } catch {
+                if (alive) setRows([])
+              }
+            }
+            load()
+            const timer = setInterval(load, 5000)
+            return () => { alive = false; clearInterval(timer) }
+          }, [tick])
           const create = () => {
             if (busy) return
             setBusy(true)
@@ -1714,25 +1754,55 @@ const WB_CALC = {
                 }
                 return workspaces.create({ path: target }).then(() =>
                   api('/project/mark', { method: 'POST', body: { path: target, enable: true } }),
-                )
+                ).then(() => setTick((value) => value + 1))
               },
               (error) => window.alert('选择文件夹失败：' + error.message),
             ).catch((error) => window.alert('创建失败：' + error.message)).finally(() => setBusy(false))
           }
-          return h('button', {
-            type: 'button',
-            className: 'dsh-wb-btn',
-            title: '新建造价项目工作区（选文件夹后自动建目录+标记）',
-            disabled: busy,
-            onClick: create,
-          }, busy ? '处理中…' : '造价工作区')
+          const openSession = (sessionId) => {
+            const target = ctx.uiWorkspace
+            if (target === undefined || target === null || typeof target.openSession !== 'function') return
+            target.openSession(sessionId)
+          }
+          const rowStyle = { display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 4px', fontSize: '12px', lineHeight: '1.5', minWidth: 0 }
+          const sessionStyle = {
+            display: 'block', width: '100%', textAlign: 'left', padding: '1px 4px 1px 14px', fontSize: '12px',
+            lineHeight: '1.5', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer',
+            opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }
+          return h('div', { style: { padding: '2px 4px 4px', minWidth: 0 } },
+            h('div', { style: { ...rowStyle, opacity: 0.6, paddingTop: 0 } },
+              h('span', { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '造价工作区'),
+              h('button', {
+                type: 'button',
+                title: '新建造价项目工作区（选文件夹后自动建目录+标记）',
+                disabled: busy,
+                onClick: create,
+                style: { background: 'none', border: 'none', color: 'inherit', cursor: busy ? 'default' : 'pointer', fontSize: '13px', lineHeight: 1, padding: '0 2px' },
+              }, busy ? '…' : '+'),
+            ),
+            rows.length === 0
+              ? h('div', { style: { ...rowStyle, opacity: 0.5 } }, '还没有造价工作区')
+              : rows.map((workspace) => h('div', { key: workspace.id },
+                  h('div', { style: { ...rowStyle, opacity: 0.85 }, title: workspace.path },
+                    h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, workspace.title),
+                  ),
+                  workspace.sessions.slice(0, 6).map((session) => h('button', {
+                    key: session.id,
+                    type: 'button',
+                    title: session.title,
+                    style: sessionStyle,
+                    onClick: () => openSession(session.id),
+                  }, '· ' + session.title)),
+                )),
+          )
         }
 
-        // 侧栏底部加「新建造价工作区」入口（可追加的 list slot；list slot 必须带 id）
+        // 侧栏底部「造价工作区」独立区块（list slot 必须带 id）
         try {
-          ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-cost-workspace' }, FooterCostButton))
+          ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-cost-workspace' }, CostWorkspaceSection))
         } catch (error) {
-          console.warn('[dsh-workbench] 侧栏底部按钮注册失败：', error instanceof Error ? error.message : String(error))
+          console.warn('[dsh-workbench] 侧栏底部区块注册失败：', error instanceof Error ? error.message : String(error))
         }
 
         // 全屏工作台（shell.overlay）+ Alt+W 热键（macOS 上是 ⌥W）

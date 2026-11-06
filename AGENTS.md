@@ -114,7 +114,7 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |
-| `sidebar.footer.action` | 无 id（list slot） | 侧栏底部「造价工作区」按钮：选文件夹 → `ctx.workspaces.create` + `/project/mark` 初始化 |
+| `sidebar.footer.action` | 无 id（list slot） | 侧栏底部「造价工作区」区块：列出已标记为造价的工作区及其会话（与官方列表分开），点击会话 `ctx.uiWorkspace.openSession`；「+」新建（选目录 → `ctx.workspaces.create` + `/project/mark`） |
 | `settings.section` | id `dsh-cost-workbench` | 「设置」新增一个造价工作台分区（库路径/子目录，组件收到 `{ close }`） |
 | `settings.section.icon` | id `dsh-cost-workbench` | 上一条导航行的图标（id 必须一致） |
 
