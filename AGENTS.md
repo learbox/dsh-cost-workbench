@@ -22,6 +22,8 @@ lib/
   usage.js         用量角标（DeepSeek 余额 + 语音剩余时长）。DeepSeek 余额在客户端优先用账号
                    `ctx.remote.account.getBalance()`（需 inject 'remote'/'remote.account'），
                    API Key 查询（Host usage.js）只作为未登录时的回退。
+                   语音资源包走 `ResourcePacksStatus`（speech_saas_prod，2025-05-20），ResourceID 用
+                   `volc.seedasr.auc`（录音文件识别；流式是 `volc.seedasr.sauc.duration`），多包汇总剩余。
 test/              node test/all.mjs
 locale/            zh / en 显示名
 scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数据）
