@@ -1708,9 +1708,10 @@ const WB_CALC = {
             let alive = true
             const load = async () => {
               try {
-                const list = ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.list?.getSnapshot === 'function'
+                const snapshot = ctx.workspaces !== undefined && ctx.workspaces !== null && typeof ctx.workspaces.list?.getSnapshot === 'function'
                   ? ctx.workspaces.list.getSnapshot()
-                  : []
+                  : null
+                const list = Array.isArray(snapshot?.items) ? snapshot.items : (Array.isArray(snapshot) ? snapshot : [])
                 const sessions = ctx.sessions !== undefined && ctx.sessions !== null && typeof ctx.sessions.list?.getSnapshot === 'function'
                   ? ctx.sessions.list.getSnapshot()
                   : { byId: {} }
