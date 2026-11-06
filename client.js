@@ -4309,7 +4309,7 @@ function CalcCard({ t }) {
                 + ((selected.transcript ?? '').match(/转写引擎:\s*(.+)/)?.[1] ? ' · ' + (selected.transcript ?? '').match(/转写引擎:\s*(.+)/)[1].trim() : '')),
               h('div', { className: 'dsh-wb-row-actions' },
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': showComments ? 'primary' : 'quiet', onClick: () => setShowComments((value) => !value) }, '高亮 ' + annotations.filter((item) => String(item.note ?? '').trim() === '').length + ' · 批注 ' + annotations.filter((item) => String(item.note ?? '').trim() !== '').length),
-                h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', disabled: importing, onClick: () => { void retranscribe() } }, importing ? '转写中…' : '重新转写'),
+                h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', disabled: importing, title: '用火山录音文件识别重新转写整段录音（消耗录音文件识别时长包）', onClick: () => { void retranscribe() } }, importing ? '转写中…' : '重新转写'),
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', title: '删除这条录音', 'aria-label': '删除这条录音', onClick: () => setConfirming(true) }, h(IconTrash, { size: 15 })),
               ),
             ),
@@ -4451,12 +4451,6 @@ function CalcCard({ t }) {
                   type: 'file', accept: 'audio/*', style: { display: 'none' }, disabled: importing,
                   onChange: (event) => { const file = event.target.files?.[0]; event.target.value = ''; void importAudio(file) },
                 }),
-              ),
-              h('select', {
-                key: 'engine', className: 'dsh-wb-input dsh-wb-select', style: { width: 'auto', height: '26px' },
-                value: 'volc-auc', title: '转写引擎', disabled: true, onChange: () => {},
-              },
-                h('option', { value: 'volc-auc' }, '火山（整段）'),
               ),
               h('button', { key: 'refresh', type: 'button', className: 'dsh-wb-btn dsh-wb-icon-btn', onClick: () => { refresh(); setRefreshTick((value) => value + 1) }, title: t('panel.refresh'), 'aria-label': t('panel.refresh') }, h(IconRefresh, null)),
               focusMode ? null : h('button', {
