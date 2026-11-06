@@ -114,9 +114,12 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |
-| `sidebar.workspaces.directoryFlow` | 无 id（single slot） | 接管「添加工作区」流程：选目录后问「是否造价项目」，是则 `/project/mark` 建目录+标记再 `onPicked` |
+| `sidebar.footer.action` | 无 id（list slot） | 侧栏底部「造价工作区」按钮：选文件夹 → `ctx.workspaces.create` + `/project/mark` 初始化 |
 | `settings.section` | id `dsh-cost-workbench` | 「设置」新增一个造价工作台分区（库路径/子目录，组件收到 `{ close }`） |
 | `settings.section.icon` | id `dsh-cost-workbench` | 上一条导航行的图标（id 必须一致） |
+
+**不要尝试接管 `sidebar.workspaces.directoryFlow`**：它是 single slot，原生目录选择器已经占着它，
+插件再 register 不会生效（实测「添加工作区」仍走原生流程）。要加工作区入口就用 `sidebar.footer.action`（list）。
 
 客户端标识（slot id、`TAB_ID`、`TAB_KIND`）仍是 `dsh-workbench` 前缀，与包名 `dsh-cost-workbench`、
 patch id `dsh-cost-workbench` 刻意分开：改客户端标识会让用户已保存的面板状态失效。改之前先读 `client.js`
