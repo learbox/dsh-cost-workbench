@@ -155,14 +155,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 
 ### 在 Obsidian 里打开
 
-资料库卡的「打开」按钮走 `obsidian://` 深链，前提是 **Obsidian 里已经把这个文件夹添加成库**：
+「打开」按钮会先判断当前项目文件夹是不是 Obsidian 库：
 
-1. 打开 Obsidian → 左下角「打开其他仓库」→「打开文件夹作为库」
-2. 选择你的工作台库目录（如 `E:\文档\Obsidian\造价工作台`）
-3. 之后再点工作台的「打开」就会直接跳到对应笔记
+- **已经添加为库** → 用 `obsidian://` 深链直接跳到对应笔记
+- **还不是库** → 自动用系统默认程序打开这篇 md，并提示你可以把它添加为库（不会再报 `Vault not found` / `Command failed`）
 
-如果 Obsidian 里的库名与文件夹名不同，到 **设置 → 造价工作台 → Obsidian 库名** 填上实际库名（留空默认用文件夹名）。
-没添加库时点「打开」，Obsidian 会弹 `Vault not found`，按上面三步添加一次即可。
+想让项目用 Obsidian 打开：Obsidian → 左下角「打开其他仓库」→「打开文件夹作为库」→ 选项目文件夹。
+库名与文件夹名不同时，到 **设置 → 造价工作台 → Obsidian 库名** 填实际库名。
 
 ## 项目 = 当前会话的工作区
 

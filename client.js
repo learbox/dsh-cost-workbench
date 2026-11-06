@@ -2584,7 +2584,7 @@ function CalcCard({ t }) {
                 for (const node of nodes) {
                   if (node.type !== 'dir') continue
                   const top = String(node.path).split('/')[0]
-                  if (top.toLowerCase() !== 'pdf') next[node.path] = true
+                  if (top.toLowerCase() !== 'pdf' && node.count > 0) next[node.path] = true
                   walk(node.children)
                 }
               }
@@ -2612,7 +2612,13 @@ function CalcCard({ t }) {
           /** 在 Obsidian 里打开这一篇（走 Host 的 /open-obsidian，避开 Web 壳丢弃自定义协议）。 */
           function openInObsidian(path) {
             api('/open-obsidian', { method: 'POST', body: { path } }).then(
-              () => setFlash('已在 Obsidian 打开'),
+              (data) => {
+                if (data !== null && data.mode === 'file') {
+                  setFlash('该项目文件夹还不是 Obsidian 库，已用系统默认程序打开；想用 Obsidian 请先把它添加为库')
+                } else {
+                  setFlash('已在 Obsidian 打开')
+                }
+              },
               (error) => setFlash('打开失败：' + error.message),
             )
           }

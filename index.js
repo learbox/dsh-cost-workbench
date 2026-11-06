@@ -88,6 +88,8 @@ const DEFAULT_CONFIG = {
   obsidianVaultName: '',
   // DSH 会话-工作区索引（用来把当前会话绑定的工作区当成项目根）
   workspaceIndexFile: '',
+  // Obsidian 库索引（判断项目文件夹是否已是库；留空按平台探测）
+  obsidianIndexFile: '',
   workbenchDir: 'Workbench',
   dataDir: '',
   cardsFile: '',
@@ -123,6 +125,7 @@ function resolveConfig(config, configFile = null) {
   if (merged.dataDir === '') merged.dataDir = join(homedir(), '.dsh-workbench')
   if (merged.userConfigFile === '') merged.userConfigFile = USER_CONFIG_FILE
   if (merged.workspaceIndexFile === '') merged.workspaceIndexFile = join(homedir(), '.dsh', 'storages', 'workspace.json')
+  if (merged.obsidianIndexFile === '') merged.obsidianIndexFile = defaultObsidianIndex()
   if (merged.cardsFile === '') merged.cardsFile = join(merged.dataDir, 'cards.json')
   if (merged.promptsFile === '') merged.promptsFile = join(merged.dataDir, 'prompts.json')
   if (merged.glossaryFile === '') merged.glossaryFile = join(merged.vaultRoot, merged.workbenchDir, '术语表.md')
@@ -431,6 +434,31 @@ function pickFolder(command, timeoutMs = 300000) {
 /** 绝对路径判断：POSIX、Windows 盘符、Windows UNC。 */
 function isAbsolutePath(value) {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
+}
+
+/** 各平台 Obsidian 的库索引位置。 */
+function defaultObsidianIndex() {
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'obsidian', 'obsidian.json')
+  }
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'obsidian', 'obsidian.json')
+  return join(homedir(), '.config', 'obsidian', 'obsidian.json')
+}
+
+/** 判断某个文件夹是否已经是 Obsidian 的库（obsidian.json 的 vaults 路径匹配，忽略大小写与尾部分隔符）。 */
+async function isVaultRegistered(vaultPath, indexFile) {
+  const normalize = (value) => String(value ?? '').replace(/[\\/]+$/, '').toLowerCase()
+  const target = normalize(vaultPath)
+  if (target === '') return false
+  try {
+    const parsed = JSON.parse(await readFile(indexFile, 'utf8'))
+    const vaults = parsed !== null && typeof parsed === 'object' && parsed.vaults !== null && typeof parsed.vaults === 'object'
+      ? parsed.vaults
+      : {}
+    return Object.keys(vaults).some((key) => normalize(vaults[key]?.path) === target)
+  } catch {
+    return false
+  }
 }
 
 /** 读 DSH 的会话-工作区索引：sessionId → 工作区路径。读不到就当没有项目上下文。 */
@@ -1160,8 +1188,16 @@ export function apply(ctx, config) {
         const body = await readJsonBody(req)
         if (typeof body.path !== 'string' || body.path === '') return writeError(res, 400, 'bad_request', '需要 path')
         const uri = vault.uriFor(body.path)
-        await openExternal(settings.openCommand, uri)
-        return writeJson(res, 200, { ok: true, uri })
+        const registered = await isVaultRegistered(stores.projectRoot, settings.obsidianIndexFile)
+        if (registered) {
+          await openExternal(settings.openCommand, uri)
+          return writeJson(res, 200, { ok: true, mode: 'obsidian', uri })
+        }
+        // 项目文件夹还不是 Obsidian 库：用系统默认程序打开这篇笔记，别让「打开」直接失败
+        const note = await vault.readNote(body.path)
+        const absolute = join(stores.projectRoot, ...String(note.path).split('/'))
+        await openExternal(settings.openCommand, absolute)
+        return writeJson(res, 200, { ok: true, mode: 'file', path: absolute, reason: 'vault-not-registered' })
       }
       // 打开外部控制台（只放行白名单域名，避免变成任意 URL 的执行器）
       if (route === '/open-url') {

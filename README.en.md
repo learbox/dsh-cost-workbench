@@ -74,16 +74,15 @@ To change the vault later, open **Settings → Cost Workbench** again and save.
 
 ### Opening notes in Obsidian
 
-The library card's **Open** button uses an `obsidian://` deep link, which requires the folder to be
-registered as a vault in Obsidian:
+The **Open** button first checks whether the current project folder is an Obsidian vault:
 
-1. Open Obsidian → “Open another vault” → “Open folder as vault”
-2. Pick your workbench vault folder (e.g. `E:\文档\Obsidian\造价工作台`)
-3. From then on **Open** jumps straight to the note
+- **registered as a vault** → opens the note through an `obsidian://` deep link
+- **not a vault yet** → opens the `.md` with the system default program and tells you it can be
+  added as a vault (no more `Vault not found` / `Command failed`)
 
-If the vault name inside Obsidian differs from the folder name, fill in
-**Settings → Cost Workbench → Obsidian vault name** (leave empty to use the folder name).
-Without the vault registered, Obsidian shows `Vault not found` — add it once as above.
+To make a project open in Obsidian: Obsidian → “Open another vault” → “Open folder as vault” →
+pick the project folder. If the vault name differs from the folder name, set it under
+**Settings → Cost Workbench → Obsidian vault name**.
 
 ### Transcription and balances (optional)
 

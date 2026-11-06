@@ -20,3 +20,5 @@
         openCommand: ""
         # 文件夹选择器命令；留空 = 按平台自动（Windows: PowerShell 文件夹选择框）
         folderPickerCommand: ""
+        # Obsidian 库索引；留空 = 按平台自动（用于判断项目文件夹是否已是 Obsidian 库）
+        obsidianIndexFile: ""

@@ -99,6 +99,8 @@ try {
     userConfigFile: join(tmp.dir, 'user-config.json'),
     // 会话-工作区索引：测试用临时文件，避免读真实 DSH 存储
     workspaceIndexFile: join(tmp.dir, 'workspace-index.json'),
+    // Obsidian 库索引：临时文件（不存在 = 未注册）
+    obsidianIndexFile: join(tmp.dir, 'obsidian.json'),
     // 故意给一个不存在的打开命令：验证 open_failed 分支，同时避免测试真的去拉起 Obsidian。
     openCommand: '__missing_open_command__',
     // 同理：文件夹选择器用不存在的命令，避免测试弹出系统对话框。
