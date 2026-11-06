@@ -2257,12 +2257,12 @@ const WB_CALC = {
                   'data-state': usage.volc.error !== undefined ? 'error' : 'ok',
                   title: usage.volc.error !== undefined
                     ? '火山语音剩余读取失败：' + usage.volc.error
-                    : '火山流式语音识别：剩余 ' + (usage.volc.remainingLabel ?? '—')
-                      + '（已用 ' + (usage.volc.used ?? 0) + ' / ' + (usage.volc.purchased ?? 0) + ' ' + (usage.volc.unit ?? '') + '）'
-                      + (usage.volc.expires ? '，到期 ' + usage.volc.expires : ''),
+                    : '录音文件识别（整段）：剩余 ' + (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—')
+                      + '；流式识别（实时）：剩余 ' + (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '未查到（免费额度请在控制台看）'),
                 },
                   h('span', null, '语音'),
-                  h('b', null, usage.volc.error !== undefined ? '—' : (usage.volc.remainingLabel ?? '—')),
+                  h('b', null, '录音'), h('span', null, usage.volc.error !== undefined ? '—' : (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—')),
+                  h('b', null, '流式'), h('span', null, usage.volc.error !== undefined ? '—' : (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '—')),
                   h('span', {
                     className: 'dsh-wb-badge-jump',
                     title: '打开火山引擎控制台查看语音资源包',

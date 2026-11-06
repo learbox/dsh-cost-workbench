@@ -23,7 +23,8 @@ lib/
                    `ctx.remote.account.getBalance()`（需 inject 'remote'/'remote.account'），
                    API Key 查询（Host usage.js）只作为未登录时的回退。
                    语音资源包走 `ResourcePacksStatus`（speech_saas_prod，2025-05-20），ResourceID 用
-                   `volc.seedasr.auc`（录音文件识别；流式是 `volc.seedasr.sauc.duration`），多包汇总剩余。
+                   `volc.seedasr.auc`（录音文件识别）+ `volc.seedasr.sauc.duration`（流式），
+                   返回里按 `auc` / `sauc` 分开汇总，界面角标显示「录音 xh 流式 xh」。
 test/              node test/all.mjs
 locale/            zh / en 显示名
 scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数据）
