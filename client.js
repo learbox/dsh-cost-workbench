@@ -26,6 +26,8 @@ window.__ModuleLoader__.load({
     const TAB_KIND = 'dsh-workbench'
     const TAB_ADDRESS = ADDRESS_PREFIX + 'panel'
     const API = '/api/dsh-workbench'
+    /** 当前打开工作台的会话；api() 会自动带上 sessionId，让 Host 按会话隔离上下文。 */
+    let currentSessionId = null
 
     /* vendor/marked.min.js (MIT, https://github.com/markedjs/marked) — 完整 Markdown 渲染 */
     const marked = (function () {
@@ -1096,12 +1098,20 @@ const WB_CALC = {
     /* ------------------------------------------------------------ 纯工具 */
 
     async function api(path, options) {
-      const request = { credentials: 'same-origin', ...options }
+      const opts = options ?? {}
+      const explicit = typeof opts.sessionId === 'string' ? opts.sessionId : null
+      const sessionId = explicit !== null ? explicit : currentSessionId
+      let target = path
+      if (typeof sessionId === 'string' && sessionId !== '' && !/[?&]sessionId=/.test(path)) {
+        target = path + (path.includes('?') ? '&' : '?') + 'sessionId=' + encodeURIComponent(sessionId)
+      }
+      const request = { credentials: 'same-origin', ...opts }
+      delete request.sessionId
       if (request.body !== undefined && typeof request.body !== 'string') {
         request.body = JSON.stringify(request.body)
-        request.headers = { 'content-type': 'application/json', ...(options && options.headers) }
+        request.headers = { 'content-type': 'application/json', ...(opts.headers) }
       }
-      const response = await fetch(API + path, request)
+      const response = await fetch(API + target, request)
       let body = null
       try {
         body = await response.json()
@@ -1661,6 +1671,7 @@ const WB_CALC = {
           React.useEffect(() => {
             activeSession.sessionId = props?.sessionId ?? null
             activeSession.panelProps = props ?? {}
+            currentSessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
           })
           if (hidden) return null
           return h('button',
@@ -1682,6 +1693,7 @@ const WB_CALC = {
           React.useEffect(() => {
             activeSession.sessionId = props?.sessionId ?? null
             activeSession.panelProps = props ?? {}
+            currentSessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
           })
           if (hidden) return null
           return h('button',
@@ -1924,6 +1936,12 @@ const WB_CALC = {
           const [pickerBusy, setPickerBusy] = React.useState(false)
           const [projectInfo, setProjectInfo] = React.useState(null)
           const [obsidianStatus, setObsidianStatus] = React.useState(null)
+          // 面板是当前会话的权威来源：api() 用这个 sessionId 让 Host 按会话隔离上下文
+          React.useEffect(() => {
+            const id = typeof props.sessionId === 'string' ? props.sessionId : null
+            currentSessionId = id
+            return () => { if (currentSessionId === id) currentSessionId = null }
+          }, [props.sessionId])
           const [registerHelp, setRegisterHelp] = React.useState(false)
           const [allowHtml, setAllowHtml] = React.useState(false)
           // 工作区类型决定默认模式：造价项目 → 造价模式；普通/未标记 → 普通模式

@@ -34,6 +34,12 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 
 ## 项目上下文（会话工作区 = 项目根）
 
+客户端所有数据请求都会自动带 `?sessionId=`（`client.js` 的 `api()` 从当前面板会话注入）。Host 用
+`contextFor(sessionId)` 按会话构建独立上下文（缓存 key = 项目路径|标记状态，标记变化或 `rebuild()` 自动失效），
+不再依赖全局 `stores`；空 sessionId 的请求回退到最近一次 `/context` 的全局上下文（设置页/脚本兼容）。
+`/context` 仍用于初始化并把全局兜底切到该会话；`/context/status` 与 `/context/mark` 也优先按 sessionId 定位。
+客户端面板挂载时会把 `currentSessionId` 设为 `props.sessionId`，`api()` 用它拼 query。
+
 客户端打开面板时 `POST /context { sessionId }`；Host 读 `~/.dsh/storages/workspace.json`
 （可用 `workspaceIndexFile` 覆盖，测试用），把该会话绑定的工作区路径当作项目根。
 只有工作区根存在隐藏标记 `.dsh-cost-workbench.json` 且 `project: true` 才进入项目模式；
@@ -68,6 +74,10 @@ POST   /context                     解析会话工作区并重建（sessionId �
 POST   /context/mark { enable }     写当前会话工作区的标记：true=造价项目（初始化目录）/ false=普通工作区
 POST   /project/mark { path, enable }  对任意已存在目录写标记并初始化（当前无 UI 调用者，保留给脚本/后续入口）
 ```
+
+**多会话隔离**：数据路由（/sop、/search、/overview、/standards|prices|changes、/recordings、
+/attachment、/open-obsidian、/obsidian-status）都会先 `requestContext(url)` 取该 `?sessionId=` 的上下文；
+新增数据路由必须同样处理，不能直接读全局 `vault`/`costTables`/`recordings`，否则多面板会互相覆盖。
 
 识别到项目后会调用 `ensureProjectLayout()` 幂等创建 `造价工作台/`、`会议记录/` 与缺失的空表；
 已有文件不覆盖，失败不阻塞读取（退回到第一次写入时创建）。

@@ -749,8 +749,8 @@ export function apply(ctx, config) {
     if (text.startsWith('@project/')) return { source: 'project', rel: text.slice('@project/'.length) }
     return { source: 'project', rel: text }
   }
-  function vaultForSource(source) {
-    return source === 'public' ? publicVault : vault
+  function vaultForSource(rc, source) {
+    return source === 'public' ? rc.publicVault : rc.vault
   }
   function withSource(source, relPath) {
     return source === 'public' ? PUBLIC_PREFIX + relPath : relPath
@@ -778,6 +778,45 @@ export function apply(ctx, config) {
     }
   }
 
+  /** 每个会话的项目上下文缓存：sessionId → { key, ctx }。 */
+  const contextCache = new Map()
+  /** 按 sessionId 构建独立上下文；空 sessionId 回退到最近一次 /context 的全局上下文。 */
+  async function contextFor(sessionId) {
+    const id = String(sessionId ?? '').trim()
+    if (id === '') return { stores, vault, publicVault, costTables, recordings }
+    const index = await readWorkspaceIndex(settings.workspaceIndexFile)
+    const workspace = index.get(id) ?? index.get('session-' + id) ?? ''
+    const marked = await readWorkspaceMarker(workspace)
+    const projectWorkspace = marked === 'project' ? workspace : ''
+    const key = projectWorkspace + '|' + marked
+    const cached = contextCache.get(id)
+    if (cached !== undefined && cached.key === key) return cached.ctx
+    const scoped = buildStores(settings, projectWorkspace)
+    const ctx = {
+      stores: scoped,
+      vault: createVaultStore({
+        vaultRoot: scoped.projectRoot,
+        sopDir: scoped.sopDir,
+        backupDir: scoped.backupDir,
+        vaultName: scoped.project === '' ? settings.obsidianVaultName : '',
+      }),
+      publicVault: createVaultStore({
+        vaultRoot: settings.vaultRoot,
+        sopDir: settings.sopDir,
+        backupDir: join(settings.vaultRoot, settings.workbenchDir, '.backups'),
+        vaultName: settings.obsidianVaultName,
+      }),
+      costTables: createCostTables({ workbenchDir: scoped.workbenchDir }),
+      recordings: createRecordingStore({ root: scoped.recordingsRoot }),
+    }
+    contextCache.set(id, { key, ctx })
+    return ctx
+  }
+  /** 从请求 URL 取 sessionId 并构建上下文（客户端每个数据请求都会带）。 */
+  async function requestContext(url) {
+    return contextFor(url.searchParams.get('sessionId') ?? '')
+  }
+
   /** 保存配置后立即重建依赖路径的部件，用户不用重启。 */
   function rebuild() {
     settings = resolveConfig(config, loadUserConfigSync(resolveUserConfigFile(config)))
@@ -796,6 +835,7 @@ export function apply(ctx, config) {
     })
     costTables = createCostTables({ workbenchDir: stores.workbenchDir })
     recordings = createRecordingStore({ root: stores.recordingsRoot })
+    contextCache.clear()
   }
   /** ASR 会话的事件订阅者：sessionId → SSE 响应对象。 */
   const asrSubscribers = new Map()
@@ -952,21 +992,21 @@ export function apply(ctx, config) {
     await recordings.writeTranscript(recordingId, markdown)
   }
 
-  async function sopListing(query) {
-    const found = await vault.discover()
-    const publicFound = await publicVault.discover()
-    const projectMatches = query === '' ? [] : await vault.search(query)
-    const publicMatches = query === '' ? [] : await publicVault.search(query)
-    const tree = query === '' ? await vault.tree() : null
+  async function sopListing(rc, query) {
+    const found = await rc.vault.discover()
+    const publicFound = await rc.publicVault.discover()
+    const projectMatches = query === '' ? [] : await rc.vault.search(query)
+    const publicMatches = query === '' ? [] : await rc.publicVault.search(query)
+    const tree = query === '' ? await rc.vault.tree() : null
     // 项目模式：项目笔记（无前缀）+ 公共笔记（@public 前缀）；普通工作区：只有公共库一份
-    const isProjectMode = stores.project !== ''
+    const isProjectMode = rc.stores.project !== ''
     const notes = isProjectMode
       ? [
           ...found.notes,
           ...publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path })),
         ]
       : publicFound.notes.map((note) => ({ ...note, path: PUBLIC_PREFIX + note.path }))
-    const publicTree = query === '' ? await publicVault.tree() : null
+    const publicTree = query === '' ? await rc.publicVault.tree() : null
     const mergedTree = query === ''
       ? [
           ...(isProjectMode
@@ -999,9 +1039,9 @@ export function apply(ctx, config) {
       ok: true,
       source: found.source,
       tree: mergedTree,
-      vaultRoot: stores.projectRoot,
-      vaultName: basename(stores.projectRoot),
-      sopDir: stores.sopDir,
+      vaultRoot: rc.stores.projectRoot,
+      vaultName: basename(rc.stores.projectRoot),
+      sopDir: rc.stores.sopDir,
       notes,
       matches,
       stats: {
@@ -1014,19 +1054,19 @@ export function apply(ctx, config) {
   }
 
   /** 全局搜索：笔记正文 + 术语表 + 造价三张表 + 录音，混排并标注来源。 */
-  async function globalSearch(rawQuery) {
+  async function globalSearch(rc, rawQuery) {
     const query = String(rawQuery ?? '').trim()
     if (query === '') return { ok: true, query: '', hits: [], counts: { sop: 0, glossary: 0, recording: 0, standards: 0, prices: 0, changes: 0 } }
     const lower = query.toLowerCase()
     const hits = []
     const counts = { sop: 0, glossary: 0, recording: 0, standards: 0, prices: 0, changes: 0 }
 
-    for (const hit of await vault.search(query, { limit: 40 })) {
+    for (const hit of await rc.vault.search(query, { limit: 40 })) {
       hits.push({ source: 'sop', path: hit.path, title: hit.title, group: hit.group, line: hit.line, snippet: hit.snippet })
       counts.sop += 1
     }
     // 公共资料库的笔记也一起搜（路径带 @public/ 前缀，点开时回资料库定位）
-    for (const hit of await publicVault.search(query, { limit: 40 })) {
+    for (const hit of await rc.publicVault.search(query, { limit: 40 })) {
       hits.push({ source: 'sop', path: PUBLIC_PREFIX + hit.path, title: hit.title, group: hit.group, line: hit.line, snippet: hit.snippet })
       counts.sop += 1
     }
@@ -1045,11 +1085,11 @@ export function apply(ctx, config) {
 
     // 录音：转写稿逐行 + 批注正文
     try {
-      const items = await recordings.list()
+      const items = await rc.recordings.list()
       for (const item of items.slice(0, 300)) {
         let text = null
         try {
-          text = await recordings.readTranscript(item.id)
+          text = await rc.recordings.readTranscript(item.id)
         } catch {
           text = null
         }
@@ -1072,7 +1112,7 @@ export function apply(ctx, config) {
           }
         }
         try {
-          for (const annotation of await recordings.readAnnotations(item.id)) {
+          for (const annotation of await rc.recordings.readAnnotations(item.id)) {
             const haystack = (annotation.quote + ' ' + annotation.note).toLowerCase()
             if (!haystack.includes(lower)) continue
             hits.push({
@@ -1096,7 +1136,7 @@ export function apply(ctx, config) {
 
     // 造价三张表：计价依据 / 材料价格 / 变更签证（落盘在 Workbench/ 下的 md）
     for (const kind of COST_TABLE_KINDS) {
-      const table = costTables[kind]
+      const table = rc.costTables[kind]
       if (table === undefined) continue
       try {
         const current = await table.api.read(table.file)
@@ -1120,11 +1160,11 @@ export function apply(ctx, config) {
   }
 
   /** 卡片摘要：每个 kind 一个，异常只写进该卡片的 error。 */
-  async function cardSummary(card) {
+  async function cardSummary(rc, card) {
     switch (card.kind) {
       case 'sop': {
-        const found = await vault.discover()
-        const publicFound = await publicVault.discover()
+        const found = await rc.vault.discover()
+        const publicFound = await rc.publicVault.discover()
         const notes = [...found.notes, ...publicFound.notes]
         return {
           status: 'ready',
@@ -1141,7 +1181,7 @@ export function apply(ctx, config) {
       case 'standards':
       case 'prices':
       case 'changes': {
-        const table = costTables[card.kind]
+        const table = rc.costTables[card.kind]
         if (table === undefined) {
           return { status: 'error', error: { code: 'no_table', message: '没有这张表：' + card.kind } }
         }
@@ -1175,7 +1215,7 @@ export function apply(ctx, config) {
     }
   }
 
-  async function buildOverview() {
+  async function buildOverview(rc) {
     const cardsResult = await readCards(settings.cardsFile)
     const warnings = []
     if (cardsResult.warning !== undefined) warnings.push(cardsResult.warning)
@@ -1183,20 +1223,20 @@ export function apply(ctx, config) {
     const cards = []
     for (const card of cardsResult.cards) {
       try {
-        cards.push({ ...card, ...(await cardSummary(card)) })
+        cards.push({ ...card, ...(await cardSummary(rc, card)) })
       } catch (error) {
         cards.push({ ...card, status: 'error', error: { code: 'card_failed', message: describe(error) } })
       }
     }
 
-    const vaultName = basename(stores.projectRoot)
+    const vaultName = basename(rc.stores.projectRoot)
     return {
       ok: true,
       version: '1.0.0',
       generatedAt: new Date().toISOString(),
       source: cardsResult.source,
       warnings,
-      vault: { root: stores.projectRoot, sopDir: stores.sopDir, workbenchDir: settings.workbenchDir, name: vaultName },
+      vault: { root: rc.stores.projectRoot, sopDir: rc.stores.sopDir, workbenchDir: settings.workbenchDir, name: vaultName },
       dataDir: settings.dataDir,
       cards,
     }
@@ -1334,21 +1374,28 @@ export function apply(ctx, config) {
       // 首次询问的答案：把当前会话工作区标记成造价项目或普通工作区（写隐藏文件到工作区根）
       if (route === '/context/mark') {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
-        if (contextWorkspace === '') return writeError(res, 400, 'bad_request', '还没有识别到当前会话的工作区')
+        // 优先按请求里的 sessionId 定位工作区（多面板并发时不会标错）
+        const markSessionId = (url.searchParams.get('sessionId') ?? '').trim()
+        let markTarget = contextWorkspace
+        if (markSessionId !== '') {
+          const index = await readWorkspaceIndex(settings.workspaceIndexFile)
+          markTarget = index.get(markSessionId) ?? index.get('session-' + markSessionId) ?? contextWorkspace
+        }
+        if (markTarget === '') return writeError(res, 400, 'bad_request', '还没有识别到当前会话的工作区')
         const body = await readJsonBody(req)
         const enable = body.enable === true
         try {
-          const markFile = join(contextWorkspace, PROJECT_MARKER)
+          const markFile = join(markTarget, PROJECT_MARKER)
           await writeFile(markFile, JSON.stringify({ project: enable, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
         } catch (error) {
           return writeError(res, 500, 'mark_failed', '写项目标记失败：' + describe(error))
         }
-        sessionWorkspace = enable ? contextWorkspace : ''
+        sessionWorkspace = enable ? markTarget : ''
         rebuild()
         const layout = enable ? await ensureProjectLayout(stores) : { ok: true }
         return writeJson(res, 200, {
           ok: true,
-          workspace: contextWorkspace,
+          workspace: markTarget,
           marked: enable ? 'project' : 'plain',
           project: stores.project,
           projectRoot: stores.projectRoot,
@@ -1424,7 +1471,8 @@ export function apply(ctx, config) {
       /* ---------------------------------------------------------- 只读 */
       if (route === '/overview') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        return writeJson(res, 200, await buildOverview())
+        const rc = await requestContext(url)
+        return writeJson(res, 200, await buildOverview(rc))
       }
       if (route === '/cards') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
@@ -1437,8 +1485,9 @@ export function apply(ctx, config) {
       /* ------------------------------------------------------ Obsidian 库状态 */
       if (route === '/obsidian-status') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        const registered = await isVaultRegistered(stores.projectRoot, settings.obsidianIndexFile)
-        return writeJson(res, 200, { ok: true, registered, project: stores.project, projectRoot: stores.projectRoot })
+        const rc = await requestContext(url)
+        const registered = await isVaultRegistered(rc.stores.projectRoot, settings.obsidianIndexFile)
+        return writeJson(res, 200, { ok: true, registered, project: rc.stores.project, projectRoot: rc.stores.projectRoot })
       }
 
       if (route === '/open-obsidian-app') {
@@ -1468,9 +1517,10 @@ export function apply(ctx, config) {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
         const body = await readJsonBody(req)
         if (typeof body.path !== 'string' || body.path === '') return writeError(res, 400, 'bad_request', '需要 path')
+        const rc = await requestContext(url)
         const { source, rel } = splitSource(body.path)
-        const targetVault = vaultForSource(source)
-        const targetRoot = source === 'public' ? settings.vaultRoot : stores.projectRoot
+        const targetVault = vaultForSource(rc, source)
+        const targetRoot = source === 'public' ? settings.vaultRoot : rc.stores.projectRoot
         const uri = targetVault.uriFor(rel)
         const registered = await isVaultRegistered(targetRoot, settings.obsidianIndexFile)
         if (registered) {
@@ -1519,8 +1569,9 @@ export function apply(ctx, config) {
       /* ---------------------------------------------------------- 附件（图片） */
       if (route === '/attachment') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const rc = await requestContext(url)
         const { source, rel } = splitSource(url.searchParams.get('path') ?? '')
-        const attachmentRoot = source === 'public' ? settings.vaultRoot : stores.projectRoot
+        const attachmentRoot = source === 'public' ? settings.vaultRoot : rc.stores.projectRoot
         const found = await findAttachmentFile(
           attachmentRoot,
           rel.trim(),
@@ -1539,23 +1590,26 @@ export function apply(ctx, config) {
       /* ------------------------------------------------------------- SOP */
       if (route === '/sop') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const rc = await requestContext(url)
         const notePath = url.searchParams.get('note')
         if (notePath !== null && notePath !== '') {
           const { source, rel } = splitSource(notePath)
-          const note = await vaultForSource(source).readNote(rel)
+          const note = await vaultForSource(rc, source).readNote(rel)
           return writeJson(res, 200, { ok: true, note: { ...note, path: withSource(source, note.path) } })
         }
-        return writeJson(res, 200, await sopListing((url.searchParams.get('q') ?? '').trim()))
+        return writeJson(res, 200, await sopListing(rc, (url.searchParams.get('q') ?? '').trim()))
       }
       if (route === '/search') {
         if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-        return writeJson(res, 200, await globalSearch(url.searchParams.get('q') ?? ''))
+        const rc = await requestContext(url)
+        return writeJson(res, 200, await globalSearch(rc, url.searchParams.get('q') ?? ''))
       }
       if (route === '/sop/refresh') {
         if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
-        vault.invalidate()
-        publicVault.invalidate()
-        return writeJson(res, 200, await sopListing((url.searchParams.get('q') ?? '').trim()))
+        const rc = await requestContext(url)
+        rc.vault.invalidate()
+        rc.publicVault.invalidate()
+        return writeJson(res, 200, await sopListing(rc, (url.searchParams.get('q') ?? '').trim()))
       }
       if (route === '/sop/note') {
         if (method === 'PUT') {
@@ -1563,8 +1617,9 @@ export function apply(ctx, config) {
           if (typeof body.path !== 'string' || typeof body.text !== 'string') {
             return writeError(res, 400, 'bad_request', '需要 path 与 text')
           }
+          const rc = await requestContext(url)
           const { source, rel } = splitSource(body.path)
-          const written = await vaultForSource(source).writeNote(rel, body.text, { expectedSha1: body.expectedSha1 })
+          const written = await vaultForSource(rc, source).writeNote(rel, body.text, { expectedSha1: body.expectedSha1 })
           return writeJson(res, 200, { ok: true, note: { ...written, path: withSource(source, written.path) } })
         }
         if (method === 'POST') {
@@ -1572,8 +1627,9 @@ export function apply(ctx, config) {
           if (typeof body.path !== 'string' || typeof body.text !== 'string') {
             return writeError(res, 400, 'bad_request', '需要 path 与 text')
           }
+          const rc = await requestContext(url)
           const { source, rel } = splitSource(body.path)
-          const created = await vaultForSource(source).createNote(rel, body.text)
+          const created = await vaultForSource(rc, source).createNote(rel, body.text)
           return writeJson(res, 200, { ok: true, note: { ...created, path: withSource(source, created.path) } })
         }
         return writeError(res, 405, 'method_not_allowed', 'PUT or POST')
@@ -1604,31 +1660,33 @@ export function apply(ctx, config) {
       }
 
       /* -------------------------------------------------- 术语表 / 造价三表 */
-      const entryTables = {
-        '/glossary': {
-          file: settings.glossaryFile,
-          api: { read: readGlossary, add: addGlossary, update: updateGlossary, remove: deleteGlossary, keys: ['zh', 'en', 'field', 'tag', 'note'] },
-        },
-        '/standards': { file: costTables.standards.file, api: costTables.standards.api },
-        '/prices': { file: costTables.prices.file, api: costTables.prices.api },
-        '/changes': { file: costTables.changes.file, api: costTables.changes.api },
-      }
-      for (const [base, config] of Object.entries(entryTables)) {
-        if (route === base || route.startsWith(base + '/')) {
-          await handleEntryTable({ req, res, url, method, route, base, file: config.file, api: config.api })
-          return
+      const tableRoute = ['/glossary', '/standards', '/prices', '/changes'].find((base) => route === base || route.startsWith(base + '/'))
+      if (tableRoute !== undefined) {
+        const rc = await requestContext(url)
+        const entryTables = {
+          '/glossary': {
+            file: settings.glossaryFile,
+            api: { read: readGlossary, add: addGlossary, update: updateGlossary, remove: deleteGlossary, keys: ['zh', 'en', 'field', 'tag', 'note'] },
+          },
+          '/standards': { file: rc.costTables.standards.file, api: rc.costTables.standards.api },
+          '/prices': { file: rc.costTables.prices.file, api: rc.costTables.prices.api },
+          '/changes': { file: rc.costTables.changes.file, api: rc.costTables.changes.api },
         }
+        const config = entryTables[tableRoute]
+        await handleEntryTable({ req, res, url, method, route, base: tableRoute, file: config.file, api: config.api })
+        return
       }
 
       /* ------------------------------------------------------------ 录音 */
+      const recordingsCtx = await requestContext(url)
       if (route === '/recordings') {
         if (method === 'GET') {
-          const items = await recordings.list()
-          return writeJson(res, 200, { ok: true, items, dir: stores.recordingsRoot })
+          const items = await recordingsCtx.recordings.list()
+          return writeJson(res, 200, { ok: true, items, dir: recordingsCtx.stores.recordingsRoot })
         }
         if (method === 'POST') {
           const body = await readJsonBody(req)
-          const created = await recordings.create({ title: typeof body.title === 'string' ? body.title : '' })
+          const created = await recordingsCtx.recordings.create({ title: typeof body.title === 'string' ? body.title : '' })
           return writeJson(res, 200, { ok: true, id: created.id, durationMs: 0 })
         }
         return writeError(res, 405, 'method_not_allowed', 'GET or POST')
@@ -1642,19 +1700,19 @@ export function apply(ctx, config) {
         if (action === 'chunk') {
           if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
           const pcm = await readRawBody(req, 8 * 1024 * 1024)
-          const written = await recordings.appendPcm(id, pcm)
+          const written = await recordingsCtx.recordings.appendPcm(id, pcm)
           const asrId = url.searchParams.get('asr')
           if (asrId !== null && asrId !== '') asrBridge.push(asrId, pcm)
           return writeJson(res, 200, { ok: true, ...written })
         }
         if (action === 'annotations') {
           if (method === 'GET') {
-            return writeJson(res, 200, { ok: true, annotations: await recordings.readAnnotations(id) })
+            return writeJson(res, 200, { ok: true, annotations: await recordingsCtx.recordings.readAnnotations(id) })
           }
           if (method === 'PUT') {
             const body = await readJsonBody(req)
             if (!Array.isArray(body.annotations)) return writeError(res, 400, 'bad_request', '需要 annotations 数组')
-            const saved = await recordings.writeAnnotations(id, body.annotations)
+            const saved = await recordingsCtx.recordings.writeAnnotations(id, body.annotations)
             return writeJson(res, 200, { ok: true, annotations: saved })
           }
           return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
@@ -1662,7 +1720,7 @@ export function apply(ctx, config) {
         if (action === 'rename') {
           if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
           const body = await readJsonBody(req)
-          const renamed = await recordings.renameRecording(id, typeof body.title === 'string' ? body.title : '')
+          const renamed = await recordingsCtx.recordings.renameRecording(id, typeof body.title === 'string' ? body.title : '')
           return writeJson(res, 200, { ok: true, id: renamed.id })
         }
         if (action === 'transcribe') {
@@ -1674,25 +1732,25 @@ export function apply(ctx, config) {
         }
         if (action === 'finalize') {
           if (method !== 'POST') return writeError(res, 405, 'method_not_allowed', 'POST only')
-          return writeJson(res, 200, { ok: true, ...(await recordings.finalize(id)) })
+          return writeJson(res, 200, { ok: true, ...(await recordingsCtx.recordings.finalize(id)) })
         }
         if (action === 'peaks') {
           if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-          return writeJson(res, 200, { ok: true, peaks: await recordings.readPeaks(id) })
+          return writeJson(res, 200, { ok: true, peaks: await recordingsCtx.recordings.readPeaks(id) })
         }
         if (action === 'audio') {
           if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
-          return serveAudio(req, res, recordings.audioPath(id))
+          return serveAudio(req, res, recordingsCtx.recordings.audioPath(id))
         }
         // transcript
         if (method === 'GET') {
-          const text = await recordings.readTranscript(id)
+          const text = await recordingsCtx.recordings.readTranscript(id)
           return writeJson(res, 200, { ok: true, exists: text !== null, text: text ?? '' })
         }
         if (method === 'PUT') {
           const body = await readJsonBody(req)
           if (typeof body.text !== 'string') return writeError(res, 400, 'bad_request', '需要 text')
-          await recordings.writeTranscript(id, body.text)
+          await recordingsCtx.recordings.writeTranscript(id, body.text)
           return writeJson(res, 200, { ok: true })
         }
         return writeError(res, 405, 'method_not_allowed', 'GET or PUT')
@@ -1701,7 +1759,7 @@ export function apply(ctx, config) {
       if (recordingOne !== null) {
         const id = decodeURIComponent(recordingOne[1])
         if (method !== 'DELETE') return writeError(res, 405, 'method_not_allowed', 'DELETE only')
-        const moved = await recordings.remove(id)
+        const moved = await recordingsCtx.recordings.remove(id)
         return writeJson(res, 200, { ok: true, movedTo: moved.movedTo })
       }
 

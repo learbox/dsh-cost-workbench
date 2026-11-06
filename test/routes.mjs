@@ -298,6 +298,12 @@ try {
   check('普通工作区资料库只显示公共库一份', nonePaths.length === new Set(nonePaths).size && nonePaths.every((path) => path.startsWith('@public/')), JSON.stringify(nonePaths))
   check('普通工作区树只有公共资料库一个根', Array.isArray(noneSop.json.tree) && noneSop.json.tree.length === 1 && noneSop.json.tree[0].name === '公共资料库', JSON.stringify((noneSop.json.tree ?? []).map((node) => node.name)))
 
+  // 按 sessionId 隔离：两个会话并发请求，各自拿到自己的工作区上下文
+  const sopProject = await call('GET', '/sop?sessionId=session-test-1')
+  const sopPlain = await call('GET', '/sop?sessionId=session-test-2')
+  check('会话1（项目）拿到项目资料库', Array.isArray(sopProject.json.tree) && sopProject.json.tree.some((node) => node.name === '项目资料库'), JSON.stringify((sopProject.json.tree ?? []).map((node) => node.name)))
+  check('会话2（普通）不混入项目资料库', Array.isArray(sopPlain.json.tree) && sopPlain.json.tree.every((node) => node.name !== '项目资料库'), JSON.stringify((sopPlain.json.tree ?? []).map((node) => node.name)))
+
   // 第一次询问选「普通工作区」：写标记 plain，不写目录
   const markPlain = await call('POST', '/context/mark', { enable: false })
   check('标为普通工作区', markPlain.status === 200 && markPlain.json.marked === 'plain' && markPlain.json.project === '', markPlain.raw.slice(0, 160))
