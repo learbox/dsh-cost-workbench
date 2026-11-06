@@ -2255,10 +2255,12 @@ const WB_CALC = {
                   type: 'button',
                   className: 'dsh-wb-badge-btn',
                   'data-state': usage.volc.error !== undefined ? 'error' : 'ok',
+                  onClick: () => { refreshUsage() },
                   title: usage.volc.error !== undefined
-                    ? '火山语音剩余读取失败：' + usage.volc.error
+                    ? '火山语音剩余读取失败：' + usage.volc.error + '（点击重试）'
                     : '录音文件识别（整段）：剩余 ' + (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—')
-                      + '；流式识别（实时）：剩余 ' + (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '未查到（免费额度请在控制台看）'),
+                      + '；流式识别（实时）：剩余 ' + (usage.volc.sauc !== null && usage.volc.sauc !== undefined ? usage.volc.sauc.label : '未查到（免费额度请在控制台看）')
+                      + '（点击刷新）',
                 },
                   h('span', null, '语音'),
                   h('b', null, '录音'), h('span', null, usage.volc.error !== undefined ? '—' : (usage.volc.auc !== null && usage.volc.auc !== undefined ? usage.volc.auc.label : '—')),
