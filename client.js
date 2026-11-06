@@ -2106,6 +2106,14 @@ const WB_CALC = {
               }, '项目：' + (projectInfo !== null && typeof projectInfo.project === 'string' && projectInfo.project !== ''
                 ? projectInfo.project
                 : '公共库')),
+              projectInfo !== null && typeof projectInfo.workspace === 'string' && projectInfo.workspace !== '' && projectInfo.marked !== 'project'
+                ? h('button', {
+                    type: 'button',
+                    title: '把这个工作区标记为造价项目（自动建 造价工作台/ 与 会议记录/）',
+                    onClick: () => markProject(true),
+                    style: { background: 'none', border: 'none', padding: 0, color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline', whiteSpace: 'nowrap' },
+                  }, '设为造价项目')
+                : null,
             ),
             usage.deepseek !== null && usage.deepseek.configured === true
               ? h('button', {
@@ -2380,18 +2388,6 @@ const WB_CALC = {
             return h('div', { className: 'dsh-wb-panel', style: { '--wb-fs': fontSize + 'px' } },
               h(StyleDefs, null),
               head,
-              projectInfo !== null && typeof projectInfo.workspace === 'string' && projectInfo.workspace !== '' && projectInfo.marked !== 'project'
-                ? h('div', { className: 'dsh-wb-warn', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' } },
-                    h('span', { style: { flex: '1 1 150px' } },
-                      projectInfo.marked === 'plain'
-                        ? '当前是普通工作区，数据在公共库。'
-                        : '这个工作区是造价项目吗？'),
-                    h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', onClick: () => markProject(true) }, '设为造价项目'),
-                    projectInfo.marked === 'none'
-                      ? h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => markProject(false) }, '普通工作区')
-                      : null,
-                  )
-                : null,
               liteMode || focusMode ? null : stripRow,
               liteMode || focusMode ? null : tabs,
               searchRow,
