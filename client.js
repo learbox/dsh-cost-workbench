@@ -1118,22 +1118,67 @@ const WB_CALC = {
       return blocks
     }
 
-    /** 行内：**粗体** / `代码` / [[双链]] / ![[图片]]。 */
-    function inlineNodes(text, keyPrefix) {
+    /** 图片附件地址：外链原样用，库内图片走 Host 的只读附件路由。 */
+    const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp)$/i
+    function attachmentSrc(rawPath, basePath = '') {
+      const clean = String(rawPath ?? '').trim().replace(/^<|>$/g, '')
+      if (clean === '') return ''
+      if (/^(https?:)?\/\//i.test(clean) || clean.startsWith('data:')) return clean
+      const normalized = clean.replace(/\\/g, '/').replace(/^\.\//, '')
+      if (normalized.includes('/')) {
+        const rel = String(basePath ?? '') === '' ? normalized : String(basePath).replace(/\/+$/, '') + '/' + normalized
+        return API + '/attachment?path=' + encodeURIComponent(rel)
+      }
+      return API + '/attachment?name=' + encodeURIComponent(normalized)
+    }
+
+    /** 行内：图片 / 双链 / 粗体 / 代码。 */
+    function inlineNodes(text, keyPrefix, basePath = '') {
       const nodes = []
-      const pattern = /(!?\[\[([^\]]+)\]\])|(\*\*([^*]+)\*\*)|(`([^`]+)`)/g
+      const pattern = /(!\[\[([^\]]+)\]\])|(!\[([^\]]*)\]\(([^)]+)\))|(\*\*([^*]+)\*\*)|(`([^`]+)`)/g
       let last = 0
       let index = 0
       let match
       while ((match = pattern.exec(text)) !== null) {
         if (match.index > last) nodes.push(text.slice(last, match.index))
         if (match[1] !== undefined) {
-          const isImage = match[1].charAt(0) === '!'
-          nodes.push(h('span', { key: keyPrefix + '-' + (index++), className: 'dsh-wb-wikilink' }, (isImage ? '图片 ' : '') + match[2]))
+          // ![[图片.png]] 或 ![[图片.png|200]]
+          const parts = match[2].split('|')
+          const target = parts[0].trim()
+          if (!IMAGE_EXT.test(target)) {
+            nodes.push(h('span', { key: keyPrefix + '-' + (index++), className: 'dsh-wb-wikilink' }, (match[1].charAt(0) === '!' ? '图片 ' : '') + match[2]))
+          } else {
+            const width = parts.length > 1 ? Number(parts[1].trim()) : NaN
+            nodes.push(h('img', {
+              key: keyPrefix + '-' + (index++),
+              className: 'dsh-wb-md-img',
+              src: attachmentSrc(target, basePath),
+              alt: target,
+              loading: 'lazy',
+              style: {
+                maxWidth: '100%',
+                borderRadius: '8px',
+                display: 'block',
+                margin: '6px 0',
+                ...(Number.isFinite(width) && width > 0 ? { width: width + 'px' } : {}),
+              },
+            }))
+          }
         } else if (match[3] !== undefined) {
-          nodes.push(h('strong', { key: keyPrefix + '-' + (index++) }, match[4]))
+          // ![alt](src)
+          const alt = match[4]
+          nodes.push(h('img', {
+            key: keyPrefix + '-' + (index++),
+            className: 'dsh-wb-md-img',
+            src: attachmentSrc(match[5], basePath),
+            alt,
+            loading: 'lazy',
+            style: { maxWidth: '100%', borderRadius: '8px', display: 'block', margin: '6px 0' },
+          }))
+        } else if (match[6] !== undefined) {
+          nodes.push(h('strong', { key: keyPrefix + '-' + (index++) }, match[7]))
         } else {
-          nodes.push(h('code', { key: keyPrefix + '-' + (index++), className: 'dsh-wb-code' }, match[6]))
+          nodes.push(h('code', { key: keyPrefix + '-' + (index++), className: 'dsh-wb-code' }, match[9]))
         }
         last = pattern.lastIndex
       }
@@ -1141,7 +1186,7 @@ const WB_CALC = {
       return nodes
     }
 
-    function MarkdownBody({ text, t }) {
+    function MarkdownBody({ text, t, basePath = '' }) {
       const parsed = parseFrontmatter(text)
       const blocks = markdownBlocks(parsed.body)
       return h('div', { className: 'dsh-wb-md' },
@@ -1156,15 +1201,15 @@ const WB_CALC = {
           : null,
         blocks.map((block, index) => {
           if (block.type === 'h') {
-            return h('div', { key: index, className: 'dsh-wb-md-h dsh-wb-md-h' + Math.min(block.level, 4) }, inlineNodes(block.text, 'h' + index))
+            return h('div', { key: index, className: 'dsh-wb-md-h dsh-wb-md-h' + Math.min(block.level, 4) }, inlineNodes(block.text, 'h' + index, basePath))
           }
           if (block.type === 'hr') return h('hr', { key: index, className: 'dsh-wb-md-hr' })
           if (block.type === 'list') {
             return h('ul', { key: index, className: 'dsh-wb-md-ul' },
-              block.items.map((item, itemIndex) => h('li', { key: itemIndex }, inlineNodes(item, 'li' + index + '-' + itemIndex))),
+              block.items.map((item, itemIndex) => h('li', { key: itemIndex }, inlineNodes(item, 'li' + index + '-' + itemIndex, basePath))),
             )
           }
-          return h('p', { key: index, className: 'dsh-wb-md-p' }, inlineNodes(block.text, 'p' + index))
+          return h('p', { key: index, className: 'dsh-wb-md-p' }, inlineNodes(block.text, 'p' + index, basePath))
         }),
       )
     }
@@ -2859,7 +2904,7 @@ function CalcCard({ t }) {
                         : null,
                     ),
                   ),
-                  h(MarkdownBody, { text: doc.text, t }),
+                  h(MarkdownBody, { text: doc.text, t, basePath: String(doc.path).split('/').slice(0, -1).join('/') }),
                 )
 
           return h(CardShell, {

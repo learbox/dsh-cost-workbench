@@ -23,9 +23,9 @@
  */
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { join, basename, dirname } from 'node:path'
+import { join, basename, dirname, extname, normalize, sep } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
@@ -566,6 +566,69 @@ async function ensureProjectLayout(stores) {
   } catch (error) {
     return { ok: false, message: describe(error) }
   }
+}
+
+/** 只读附件（图片）路由支持的 MIME。 */
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+}
+
+/**
+ * 在项目根内找一张图片附件。
+ * - relPath：相对项目根的路径（笔记里写的相对路径）；
+ * - fileName：只给文件名时（Obsidian 的 ![[图片.png]]），在项目根内限深限量按名查找。
+ * 任何越界、非图片、不存在都返回 null。
+ */
+async function findAttachmentFile(root, relPath, fileName) {
+  const isImage = (target) => IMAGE_MIME[extname(target).toLowerCase()] !== undefined
+  if (relPath !== '') {
+    if (isAbsolutePath(relPath)) return null
+    const normalized = normalize(relPath)
+    if (normalized.startsWith('..') || normalized.includes('..' + sep)) return null
+    const abs = join(root, normalized)
+    if (!abs.startsWith(root + sep)) return null
+    if (!isImage(abs)) return null
+    try {
+      const info = await stat(abs)
+      return info.isFile() ? { abs, info } : null
+    } catch {
+      return null
+    }
+  }
+  const target = String(fileName ?? '').split(/[\\/]/).pop()
+  if (target === '' || target === undefined || !isImage(target)) return null
+  const wanted = target.toLowerCase()
+  const queue = [{ dir: root, depth: 0 }]
+  let visited = 0
+  while (queue.length > 0 && visited < 800) {
+    const current = queue.shift()
+    visited += 1
+    let entries
+    try {
+      entries = await readdir(current.dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const abs = join(current.dir, entry.name)
+      if (entry.isFile() && entry.name.toLowerCase() === wanted) {
+        try {
+          return { abs, info: await stat(abs) }
+        } catch {
+          return null
+        }
+      }
+      if (entry.isDirectory() && current.depth < 6) queue.push({ dir: abs, depth: current.depth + 1 })
+    }
+  }
+  return null
 }
 
 /** 读原始字节体（音频分片用），超过上限直接拒绝。 */
@@ -1240,6 +1303,24 @@ export function apply(ctx, config) {
         }
         await openExternal(settings.openCommand, target)
         return writeJson(res, 200, { ok: true, url: target })
+      }
+
+      /* ---------------------------------------------------------- 附件（图片） */
+      if (route === '/attachment') {
+        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const found = await findAttachmentFile(
+          stores.projectRoot,
+          (url.searchParams.get('path') ?? '').trim(),
+          (url.searchParams.get('name') ?? '').trim(),
+        )
+        if (found === null) return writeError(res, 404, 'not_found', '找不到图片附件')
+        res.writeHead(200, {
+          'content-type': IMAGE_MIME[extname(found.abs).toLowerCase()] ?? 'application/octet-stream',
+          'content-length': String(found.info.size),
+          'cache-control': 'no-store',
+        })
+        createReadStream(found.abs).pipe(res)
+        return
       }
 
       /* ------------------------------------------------------------- SOP */

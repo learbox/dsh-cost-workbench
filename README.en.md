@@ -241,8 +241,11 @@ your recordings.
 - **The shortcut is `Alt+W`** (not macOS's `⌥W`). The host or an IME may claim `Alt+W`; use the icon then.
 - **Microphone access** is controlled by Windows: Settings → Privacy & security → Microphone → allow
   desktop apps before recording for the first time.
-- **Images in notes are not rendered**; they appear as a filename label. Text content (headings,
-  lists, bold, code, wikilinks) is shown normally.
+- **Images render inline**: use `![[photo.jpg]]` (Obsidian embed, optional `|200` for width) or
+  `![](attachments/photo.jpg)` (path relative to the note). The workbench resolves it by relative
+  path, or by filename inside the project folder — just keep images in the project folder.
+- If an image cannot be found it falls back to a filename label; non-image attachments
+  (PDF/Excel/Word) still appear as filename labels.
 - Markdown support is deliberately minimal: no HTML, no embedded PDFs, no mermaid.
 - Annotations anchor to the **first line** of a multi-line selection; the highlight colour is fixed.
 - Transcribing an imported audio file shows no progress bar.

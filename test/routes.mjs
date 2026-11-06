@@ -201,6 +201,63 @@ try {
   const obsAfter = await call('GET', '/obsidian-status')
   check('注册后识别为 Obsidian 库', obsAfter.status === 200 && obsAfter.json.registered === true)
 
+  /* ------------------------------------------------------ 图片附件 */
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await writeFile(join(projectDir, '图.png'), png)
+  await mkdir(join(projectDir, '附件'), { recursive: true })
+  await writeFile(join(projectDir, '附件', '现场.png'), png)
+  {
+    const req = {
+      method: 'GET',
+      url: '/api/dsh-workbench/attachment?name=' + encodeURIComponent('图.png'),
+      headers: { host: '127.0.0.1:58900' },
+      socket: { remoteAddress: '127.0.0.1' },
+      on() {},
+      async *[Symbol.asyncIterator]() {},
+    }
+    let head = null
+    let bytes = 0
+    const res = {
+      writeHead(status, headers) { head = { status, headers } },
+      write(chunk) { bytes += chunk.length; return true },
+      end() {},
+      on() {},
+      once() {},
+      emit() {},
+      removeListener() {},
+    }
+    await call.handler(req, res)
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    check('图片附件按文件名找到', head !== null && head.status === 200 && String(head.headers['content-type']).startsWith('image/png'), JSON.stringify(head))
+    check('图片附件有内容', bytes > 0, bytes)
+  }
+  {
+    const req = {
+      method: 'GET',
+      url: '/api/dsh-workbench/attachment?path=' + encodeURIComponent('附件/现场.png'),
+      headers: { host: '127.0.0.1:58900' },
+      socket: { remoteAddress: '127.0.0.1' },
+      on() {},
+      async *[Symbol.asyncIterator]() {},
+    }
+    let head = null
+    let bytes = 0
+    const res = {
+      writeHead(status, headers) { head = { status, headers } },
+      write(chunk) { bytes += chunk.length; return true },
+      end() {},
+      on() {},
+      once() {},
+      emit() {},
+      removeListener() {},
+    }
+    await call.handler(req, res)
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    check('图片附件按相对路径找到', head !== null && head.status === 200 && bytes > 0, JSON.stringify(head))
+  }
+  check('附件越界被拒', (await call('GET', '/attachment?path=' + encodeURIComponent('../outside.png'))).status === 404)
+  check('非图片附件被拒', (await call('GET', '/attachment?path=' + encodeURIComponent('造价工作台/计价依据.md'))).status === 404)
+
   const ctxOff = await call('POST', '/context', { sessionId: '' })
   check('清空会话后回退公共库', ctxOff.status === 200 && ctxOff.json.project === '')
   const publicStandards = await call('GET', '/standards')
