@@ -173,29 +173,117 @@ function describe(error) {
  * Windows 没有 `/usr/bin/open`：走 `cmd /c start "" <target>`；macOS 用 open，Linux 用 xdg-open。
  * openCommand 配了值就优先用配置的命令（跨平台自定义时用）。
  */
-function openExternal(command, target) {
+/** 从注册表读某个协议的打开命令（Windows 协议处理器的真实定义）。返回 { exe, rest }。 */
+async function readProtocolCommand(protocol) {
+  const safe = /^[a-z][a-z0-9+.-]*$/i.test(protocol) ? protocol : ''
+  if (safe === '') return null
+  for (const root of ['HKCU', 'HKLM']) {
+    const key = root + '\\Software\\Classes\\' + safe + '\\shell\\open\\command'
+    const output = await new Promise((resolve) => {
+      try {
+        execFile('reg.exe', ['query', key, '/ve'], { windowsHide: true, timeout: 3000 }, (error, stdout) => {
+          resolve(error === null ? String(stdout) : '')
+        })
+      } catch {
+        resolve('')
+      }
+    })
+    const match = /"([^"]+)"\s*(.*)$/m.exec(output)
+    if (match !== null) return { exe: match[1], rest: match[2].trim() }
+  }
+  return null
+}
+
+/** 把注册表命令里的 %1 占位换成目标 URL，返回参数数组。 */
+function protocolArgs(rest, target) {
+  if (rest === '' || /^"?%1"?$/.test(rest)) return [target]
+  const placeholder = rest.replace(/"%1"|%1/g, '__DSH_TARGET__')
+  const parts = placeholder.split(/\s+/).filter((part) => part !== '')
+  return parts.map((part) => (part === '__DSH_TARGET__' ? target : part))
+}
+
+/**
+ * 用系统默认程序打开一个 URI / 网页。
+ * 顺序：自定义命令 → Electron 原生 shell.openExternal（桌面 Host）→
+ * Windows 协议处理器（注册表读 exe 直接调用，等同系统行为）→ cmd start / explorer 兜底。
+ * Windows 不能把 URL 交给 cmd：`&` 会被当命令分隔符、`%XX` 会被当变量展开（实测会报
+ * 'file' is not recognized / Command failed），所以必须直接调用注册表里的处理器。
+ */
+async function openExternal(command, target) {
   const custom = typeof command === 'string' ? command.trim() : ''
-  return new Promise((resolve, reject) => {
-    const done = (error) => {
-      if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
-      else resolve()
-    }
+  if (custom !== '') {
+    await new Promise((resolve, reject) => {
+      try {
+        execFile(custom, [target], { timeout: 5000, windowsHide: true }, (error) => {
+          if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+          else resolve()
+        })
+      } catch (error) {
+        reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+      }
+    })
+    return
+  }
+  // 桌面版 Host 在 Electron 主进程里：直接交给 Chromium 的 ShellExecute，最可靠。
+  if (process.versions.electron !== undefined) {
     try {
-      if (custom !== '') {
-        execFile(custom, [target], { timeout: 5000, windowsHide: true }, done)
+      const electron = await import('electron')
+      const shellApi = electron !== null && electron.shell !== undefined ? electron.shell : null
+      if (shellApi !== null && typeof shellApi.openExternal === 'function') {
+        await shellApi.openExternal(target)
         return
       }
-      if (process.platform === 'win32') {
-        // 不能用 cmd（URL 里的 %XX 会被当变量展开），rundll32 对带查询串的协议也不稳；
-        // PowerShell 的 Start-Process 走 ShellExecute，URL 原样交给协议处理器。
-        const escaped = target.replace(/'/g, "''")
-        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', "Start-Process -FilePath '" + escaped + "'"], { timeout: 8000, windowsHide: true }, done)
-        return
+    } catch {
+      // 不是主进程或模块不可用：继续走平台回退
+    }
+  }
+  if (process.platform === 'win32') {
+    const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(target)
+    const handler = schemeMatch === null ? null : await readProtocolCommand(schemeMatch[1])
+    if (handler !== null) {
+      await new Promise((resolve, reject) => {
+        try {
+          execFile(handler.exe, protocolArgs(handler.rest, target), { timeout: 15000, windowsHide: true }, (error) => {
+            if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+            else resolve()
+          })
+        } catch (error) {
+          reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+        }
+      })
+      return
+    }
+    // 没有注册处理器时的最后兜底（cmd start 的退出码对 URL 不可靠，只把起不来当失败）
+    await new Promise((resolve, reject) => {
+      const fallbackExplorer = () => {
+        try {
+          execFile('explorer.exe', [target], { timeout: 5000, windowsHide: true }, (error) => {
+            if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+            else resolve()
+          })
+        } catch (error) {
+          reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+        }
       }
-      execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { timeout: 5000 }, done)
+      try {
+        execFile('cmd', ['/c', 'start', '', target], { timeout: 5000, windowsHide: true }, (error) => {
+          if (error !== null && (error.code === 'ENOENT' || error.code === 'EPERM')) fallbackExplorer()
+          else resolve()
+        })
+      } catch {
+        fallbackExplorer()
+      }
+    })
+    return
+  }
+  await new Promise((resolve, reject) => {
+    try {
+      execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { timeout: 5000 }, (error) => {
+        if (error !== null) reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
+        else resolve()
+      })
     } catch (error) {
-      // 某些受限环境里 execFile 会同步抛（如 EPERM）；统一成 open_failed 交给上层。
-      done(error)
+      reject(Object.assign(new Error(describe(error)), { code: 'open_failed' }))
     }
   })
 }
