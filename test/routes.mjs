@@ -263,6 +263,41 @@ try {
   const publicStandards = await call('GET', '/standards')
   check('公共库数据未受影响', publicStandards.json.entries.some((entry) => entry.code === 'GB50500'))
 
+  /* ------------------------------------------------------ vendor 脚本与 allowHtml */
+  {
+    const req = {
+      method: 'GET',
+      url: '/api/dsh-workbench/vendor?name=highlight.min.js',
+      headers: { host: '127.0.0.1:58900' },
+      socket: { remoteAddress: '127.0.0.1' },
+      on() {},
+      async *[Symbol.asyncIterator]() {},
+    }
+    let head = null
+    let bytes = 0
+    const res = {
+      writeHead(status, headers) { head = { status, headers } },
+      write(chunk) { bytes += chunk.length; return true },
+      end() {},
+      on() {},
+      once() {},
+      emit() {},
+      removeListener() {},
+    }
+    await call.handler(req, res)
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    check('vendor 下发高亮脚本', head !== null && head.status === 200 && String(head.headers['content-type']).startsWith('text/javascript'), JSON.stringify(head))
+    check('vendor 脚本有内容', bytes > 0, bytes)
+  }
+  check('vendor 白名单拒绝任意文件', (await call('GET', '/vendor?name=../index.js')).status === 404)
+  const cfgDefault = await call('GET', '/config')
+  check('原始 HTML 默认关闭', cfgDefault.status === 200 && cfgDefault.json.allowHtml === false, cfgDefault.raw.slice(0, 160))
+  const cfgOn = await call('PUT', '/config', { vaultRoot, sopDir: siteDir, recordingsDir: '会议记录', allowHtml: true })
+  check('allowHtml 可开启', cfgOn.status === 200 && cfgOn.json.allowHtml === true, cfgOn.raw.slice(0, 160))
+  check('重新读取仍为开启', (await call('GET', '/config')).json.allowHtml === true)
+  const cfgOff = await call('PUT', '/config', { vaultRoot, sopDir: siteDir, recordingsDir: '会议记录', allowHtml: false })
+  check('allowHtml 可关闭', cfgOff.status === 200 && cfgOff.json.allowHtml === false)
+
   const stdSearch = await call('GET', '/search?q=' + encodeURIComponent('GB50500'))
   check('搜索命中计价依据', stdSearch.json.hits.some((hit) => hit.source === 'standards'), JSON.stringify(stdSearch.json.counts))
   const priceSearch = await call('GET', '/search?q=' + encodeURIComponent('螺纹钢'))

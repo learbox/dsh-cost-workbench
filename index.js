@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs'
 import { join, basename, dirname, extname, normalize, sep } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 
 import { readCards } from './lib/cards.js'
 import { readPrompts } from './lib/prompts.js'
@@ -48,6 +49,9 @@ import { createUsageReader } from './lib/usage.js'
 export const inject = ['webServer']
 
 const API_PREFIX = '/api/dsh-workbench'
+const PKG_DIR = dirname(fileURLToPath(import.meta.url))
+// 允许按需下发的第三方脚本（都在包的 vendor/ 目录里，不可任意读文件）
+const VENDOR_SCRIPTS = new Set(['mermaid.min.js', 'highlight.min.js'])
 const USER_CONFIG_FILE = join(homedir(), '.dsh-workbench', 'config.json')
 
 /** 同步读用户配置：apply 阶段就要定下路径，不能等异步。 */
@@ -90,6 +94,8 @@ const DEFAULT_CONFIG = {
   workspaceIndexFile: '',
   // Obsidian 库索引（判断项目文件夹是否已是库；留空按平台探测）
   obsidianIndexFile: '',
+  // 是否允许笔记里的原始 HTML 执行（默认关闭，设置页开启需二次确认）
+  allowHtml: false,
   workbenchDir: 'Workbench',
   dataDir: '',
   cardsFile: '',
@@ -111,6 +117,7 @@ function resolveConfig(config, configFile = null) {
     for (const key of Object.keys(DEFAULT_CONFIG)) {
       if (typeof config[key] === 'string') merged[key] = config[key]
     }
+    if (typeof config.allowHtml === 'boolean') merged.allowHtml = config.allowHtml
   }
   for (const key of Object.keys(merged)) {
     if (typeof merged[key] === 'string') merged[key] = merged[key].trim()
@@ -121,6 +128,7 @@ function resolveConfig(config, configFile = null) {
       const value = typeof configFile[key] === 'string' ? configFile[key].trim() : ''
       if (value !== '' && (merged[key] === '' || merged[key] === DEFAULT_CONFIG[key] || key === 'vaultRoot')) merged[key] = value
     }
+    if (typeof configFile.allowHtml === 'boolean') merged.allowHtml = configFile.allowHtml
   }
   if (merged.dataDir === '') merged.dataDir = join(homedir(), '.dsh-workbench')
   if (merged.userConfigFile === '') merged.userConfigFile = USER_CONFIG_FILE
@@ -720,6 +728,7 @@ export function apply(ctx, config) {
       recordingsDir: settings.recordingsDir,
       dataDir: settings.dataDir,
       configFile: settings.userConfigFile,
+      allowHtml: settings.allowHtml === true,
     }
   }
 
@@ -1127,6 +1136,7 @@ export function apply(ctx, config) {
             workbenchDir: typeof body.workbenchDir === 'string' && body.workbenchDir.trim() !== '' ? body.workbenchDir.trim() : 'Workbench',
             recordingsDir: typeof body.recordingsDir === 'string' && body.recordingsDir.trim() !== '' ? body.recordingsDir.trim() : '会议记录',
             dataDir: typeof body.dataDir === 'string' && body.dataDir.trim() !== '' ? body.dataDir.trim() : '',
+            allowHtml: body.allowHtml === true,
           }
           await mkdir(dirname(settings.userConfigFile), { recursive: true })
           // 把该有的目录先建出来：用户不需要自己去 Finder 里新建
@@ -1303,6 +1313,26 @@ export function apply(ctx, config) {
         }
         await openExternal(settings.openCommand, target)
         return writeJson(res, 200, { ok: true, url: target })
+      }
+
+      /* ---------------------------------------------------------- 第三方脚本（按需加载） */
+      if (route === '/vendor') {
+        if (method !== 'GET') return writeError(res, 405, 'method_not_allowed', 'GET only')
+        const name = url.searchParams.get('name') ?? ''
+        if (!VENDOR_SCRIPTS.has(name)) return writeError(res, 404, 'not_found', '未知脚本')
+        const file = join(PKG_DIR, 'vendor', name)
+        try {
+          const info = await stat(file)
+          res.writeHead(200, {
+            'content-type': 'text/javascript; charset=utf-8',
+            'content-length': String(info.size),
+            'cache-control': 'no-store',
+          })
+          createReadStream(file).pipe(res)
+        } catch {
+          return writeError(res, 404, 'not_found', '脚本不存在：' + name)
+        }
+        return
       }
 
       /* ---------------------------------------------------------- 附件（图片） */

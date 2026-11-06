@@ -19,7 +19,6 @@
     "vendor/**",
     "scripts/**",
     "README.md",
-    "README.en.md",
     "PRIVACY.md",
     "LICENSE"
   ],

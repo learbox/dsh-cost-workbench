@@ -1,6 +1,6 @@
 # 维护者说明
 
-这个插件怎么改、改哪里、改完怎么验。用户文档在 `README.md`（中文，GitHub 默认）与 `README.en.md`（英文），这里只记维护者需要的东西。
+这个插件怎么改、改哪里、改完怎么验。用户文档在 `README.md`（中文），这里只记维护者需要的东西。
 
 ## 目录布局
 
@@ -51,6 +51,7 @@ scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数
 
 ```
 GET    /attachment?path=<相对项目根的路径>   只读图片附件（也支持 ?name=<文件名> 在项目根内按名查找）
+GET    /vendor?name=mermaid.min.js|highlight.min.js   按需下发 vendor 脚本（白名单）
 POST   /context                             解析会话工作区并重建（sessionId 为空 = 回退公共库）
 ```
 
@@ -172,8 +173,11 @@ node test/routes.mjs        # 只跑路由套件（调试时用）
 
 - 图片按 `![[图.png]]` / `![](相对路径)` 渲染：客户端把链接转成 `/attachment` 请求，Host 只在
   项目根内找图片（路径越界拒绝；只给文件名时限深 6 层、最多 800 个目录按名查找）；非图片附件仍显示文件名。
-- Markdown 用内联的 marked（`vendor/marked.min.js`，MIT）渲染完整 GFM；原始 HTML 允许执行（用户选择）。
-  `renderMarkdown()` 先处理 Obsidian 的 `![[图片]]` 与 `[[双链]]` 再交给 marked；mermaid/内嵌 PDF 不渲染。
+- Markdown 用内联的 marked（`vendor/marked.min.js`，MIT）渲染完整 GFM；代码高亮（`vendor/highlight.min.js`）
+  与 mermaid（`vendor/mermaid.min.js`）由 Host 的 `/vendor` 路由按需下发，不内联进 client。
+  `renderMarkdown()` 先处理 Obsidian 的 `![[图片]]` 与 `[[双链]]` 再交给 marked。
+- 原始 HTML 默认关闭（`allowHtml=false`）；设置页勾选时二次确认，开启后笔记里的原始 HTML 才会执行。
+- mermaid 支持（按需加载、`securityLevel: strict`）；内嵌 PDF 不渲染。
 - 批注锚定到多行选择的起始行；高亮颜色固定。
 - 导入音频转写没有进度条。
 - 三张表没有跨进程写锁：工作台与 Obsidian 同时改同一个表文件时，后写的一方可能覆盖前一方（有 `.bak` 兜底）。

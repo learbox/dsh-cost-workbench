@@ -301,6 +301,40 @@ const WB_CALC = {
   },
 }
 
+    /* 代码高亮 / mermaid 按需加载：脚本由 Host 的 /vendor 路由从包的 vendor/ 下发，不进主 bundle。 */
+    let mermaidLib = null
+    let hljsLib = null
+    function loadVendorScript(name) {
+      return new Promise((resolve, reject) => {
+        try {
+          const element = document.createElement('script')
+          element.src = API + '/vendor?name=' + encodeURIComponent(name)
+          element.async = true
+          element.onload = () => resolve()
+          element.onerror = () => reject(new Error('脚本加载失败：' + name))
+          document.head.appendChild(element)
+        } catch (error) {
+          reject(error)
+        }
+      })
+    }
+    function ensureMermaid() {
+      if (mermaidLib !== null) return Promise.resolve(mermaidLib)
+      return loadVendorScript('mermaid.min.js').then(() => {
+        mermaidLib = globalThis.mermaid ?? null
+        if (mermaidLib === null) throw new Error('mermaid 未就绪')
+        try { mermaidLib.initialize({ startOnLoad: false, securityLevel: 'strict' }) } catch { /* 初始化失败时保留默认 */ }
+        return mermaidLib
+      })
+    }
+    function ensureHljs() {
+      if (hljsLib !== null) return Promise.resolve(hljsLib)
+      return loadVendorScript('highlight.min.js').then(() => {
+        hljsLib = globalThis.hljs ?? null
+        return hljsLib
+      })
+    }
+
     const ZH = {
       'tab.title': '造价工作台',
       'header.open': '造价工作台',
@@ -852,6 +886,24 @@ const WB_CALC = {
 .dsh-wb-md-html a{color:var(--dsw-alias-brand-primary);text-decoration:underline}
 .dsh-wb-md-html del{opacity:.7}
 .dsh-wb-md-html img{max-width:100%;height:auto;border-radius:8px;display:block;margin:6px 0}
+.dsh-wb-md-html .dsh-wb-md-mermaid{margin:10px 0;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);overflow:auto;text-align:center}
+.dsh-wb-md-html .dsh-wb-md-mermaid svg{max-width:100%;height:auto}
+.dsh-wb-md-html .hljs-comment,.dsh-wb-md-html .hljs-quote{color:#8b949e;font-style:italic}
+.dsh-wb-md-html .hljs-keyword,.dsh-wb-md-html .hljs-selector-tag,.dsh-wb-md-html .hljs-literal{color:#a626a4}
+.dsh-wb-md-html .hljs-string,.dsh-wb-md-html .hljs-attr,.dsh-wb-md-html .hljs-template-tag{color:#50a14f}
+.dsh-wb-md-html .hljs-number,.dsh-wb-md-html .hljs-symbol{color:#986801}
+.dsh-wb-md-html .hljs-title,.dsh-wb-md-html .hljs-function,.dsh-wb-md-html .hljs-name{color:#4078f2}
+.dsh-wb-md-html .hljs-built_in,.dsh-wb-md-html .hljs-type{color:#c18401}
+.dsh-wb-md-html .hljs-variable,.dsh-wb-md-html .hljs-params{color:#e45649}
+@media (prefers-color-scheme: dark){
+  .dsh-wb-md-html .hljs-comment,.dsh-wb-md-html .hljs-quote{color:#7f848e}
+  .dsh-wb-md-html .hljs-keyword,.dsh-wb-md-html .hljs-selector-tag,.dsh-wb-md-html .hljs-literal{color:#c678dd}
+  .dsh-wb-md-html .hljs-string,.dsh-wb-md-html .hljs-attr{color:#98c379}
+  .dsh-wb-md-html .hljs-number{color:#d19a66}
+  .dsh-wb-md-html .hljs-title,.dsh-wb-md-html .hljs-function,.dsh-wb-md-html .hljs-name{color:#61afef}
+  .dsh-wb-md-html .hljs-built_in,.dsh-wb-md-html .hljs-type{color:#e5c07b}
+  .dsh-wb-md-html .hljs-variable,.dsh-wb-md-html .hljs-params{color:#e06c75}
+}
 .dsh-wb-code{padding:1px 4px;border-radius:4px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:calc(var(--wb-fs) - 2px)}
 .dsh-wb-wikilink{color:var(--dsw-alias-brand-primary);border-bottom:1px dashed currentColor}
 .dsh-wb-props{margin:0 0 10px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}
@@ -1266,8 +1318,32 @@ const WB_CALC = {
         .replace(/"/g, '&quot;')
     }
 
+    /** 两个 marked 实例：默认把 HTML token 转义成文本，开启 allowHtml 时才原样输出。 */
+    let markedSafe = null
+    let markedRaw = null
+    function markdownEngine(allowHtml) {
+      if (allowHtml === true) {
+        if (markedRaw === null) markedRaw = new marked.Marked({ gfm: true, breaks: false, html: true })
+        return markedRaw
+      }
+      if (markedSafe === null) {
+        markedSafe = new marked.Marked({ gfm: true, breaks: false })
+        markedSafe.use({
+          renderer: {
+            html(token) {
+              const text = typeof token === 'string'
+                ? token
+                : (token !== null && typeof token === 'object' ? (token.text ?? token.raw ?? '') : '')
+              return escapeHtml(text)
+            },
+          },
+        })
+      }
+      return markedSafe
+    }
+
     /** 用 marked 渲染完整 Markdown；先处理 Obsidian 的 ![[图片]] 与 [[双链]]。 */
-    function renderMarkdown(text, basePath = '') {
+    function renderMarkdown(text, basePath = '', allowHtml = false) {
       let source = String(text ?? '')
       source = source.replace(/!\[\[([^\]]+)\]\]/g, (all, inner) => {
         const parts = String(inner).split('|')
@@ -1282,16 +1358,54 @@ const WB_CALC = {
       })
       source = source.replace(/\[\[([^\]]+)\]\]/g, (all, inner) => '<span class="dsh-wb-wikilink">' + escapeHtml(inner) + '</span>')
       try {
-        return marked.parse(source, { gfm: true, breaks: false })
+        return markdownEngine(allowHtml).parse(source)
       } catch {
         return '<p>' + escapeHtml(source) + '</p>'
       }
     }
 
-    function MarkdownBody({ text, t, basePath = '' }) {
+    function MarkdownBody({ text, t, basePath = '', allowHtml = false }) {
       const parsed = parseFrontmatter(text)
-      const html = renderMarkdown(parsed.body, basePath)
-      return h('div', { className: 'dsh-wb-md' },
+      const html = renderMarkdown(parsed.body, basePath, allowHtml)
+      const containerRef = React.useRef(null)
+      React.useEffect(() => {
+        const root = containerRef.current
+        if (root === null || typeof root.querySelectorAll !== 'function') return undefined
+        let alive = true
+        const codeBlocks = Array.from(root.querySelectorAll('pre code'))
+        const mermaidBlocks = codeBlocks.filter((block) => String(block.className).includes('language-mermaid'))
+        if (codeBlocks.length > 0) {
+          ensureHljs().then((hljs) => {
+            if (!alive || hljs === null) return
+            for (const block of codeBlocks) {
+              if (String(block.className).includes('language-mermaid')) continue
+              try { hljs.highlightElement(block) } catch { /* 单个块失败忽略 */ }
+            }
+          }).catch(() => { /* 高亮不可用不影响阅读 */ })
+        }
+        if (mermaidBlocks.length > 0) {
+          ensureMermaid().then(async (mermaid) => {
+            if (!alive) return
+            for (let index = 0; index < mermaidBlocks.length; index += 1) {
+              if (!alive) return
+              const code = mermaidBlocks[index]
+              const definition = code.textContent ?? ''
+              if (definition.trim() === '') continue
+              try {
+                const result = await mermaid.render('dsh-mermaid-' + Date.now() + '-' + index, definition)
+                const wrapper = document.createElement('div')
+                wrapper.className = 'dsh-wb-md-mermaid'
+                wrapper.innerHTML = result.svg
+                if (code.parentElement !== null) code.parentElement.replaceWith(wrapper)
+              } catch {
+                // 渲染失败保留原始代码块，便于查看源码
+              }
+            }
+          }).catch(() => { /* 脚本不可用时保留代码块 */ })
+        }
+        return () => { alive = false }
+      }, [text, basePath, allowHtml])
+      return h('div', { className: 'dsh-wb-md', ref: containerRef },
         parsed.properties.length > 0
           ? h('div', { className: 'dsh-wb-props' },
               h('div', { className: 'dsh-wb-props-title' }, t('sop.props')),
@@ -1727,12 +1841,14 @@ const WB_CALC = {
           const [projectInfo, setProjectInfo] = React.useState(null)
           const [obsidianStatus, setObsidianStatus] = React.useState(null)
           const [registerHelp, setRegisterHelp] = React.useState(false)
+          const [allowHtml, setAllowHtml] = React.useState(false)
           React.useEffect(() => {
             let alive = true
             api('/config').then(
               (data) => {
                 if (!alive) return
                 setSetup(data)
+                setAllowHtml(data.allowHtml === true)
                 if (data.configured !== true) setSetupDraft({ vaultRoot: '', sopDir: data.sopDir ?? '00 资料库', recordingsDir: data.recordingsDir ?? '会议记录', obsidianVaultName: data.obsidianVaultName ?? '' })
               },
               () => { if (alive) setSetup({ configured: false, error: true }) },
@@ -2067,7 +2183,7 @@ const WB_CALC = {
             )
           } else if (activeCard !== null && mode === 'cost') {
             const shared = { key: activeCard.id, card: activeCard, t, requestInsert, insertPrompt, prompts, setFlash, vault, insertNote, focusMode, setFocusMode, onUsageChanged: refreshUsage, refreshTick, ...(activeCard.kind === 'recorder' ? { focusRecording, onRecordingHandled: () => setFocusRecording(null) } : {}) }
-            if (activeCard.kind === 'sop') body = h(SopCard, { ...shared, focusNote, onFocusHandled: () => setFocusNote(null), obsidianStatus, onNeedRegister: () => setRegisterHelp(true) })
+            if (activeCard.kind === 'sop') body = h(SopCard, { ...shared, focusNote, onFocusHandled: () => setFocusNote(null), obsidianStatus, allowHtml, onNeedRegister: () => setRegisterHelp(true) })
             else if (activeCard.kind === 'standards' || activeCard.kind === 'prices' || activeCard.kind === 'changes') body = h(TableCard, shared)
             else if (activeCard.kind === 'calc') body = h(CalcCard, shared)
             else if (activeCard.kind === 'recorder') body = h(RecorderCard, shared)
@@ -2692,7 +2808,7 @@ function CalcCard({ t }) {
   )
 }
 
-        function SopCard({ card, t, requestInsert, setFlash, vault, focusNote, onFocusHandled, focusMode, setFocusMode, refreshTick = 0, obsidianStatus, onNeedRegister }) {
+        function SopCard({ card, t, requestInsert, setFlash, vault, focusNote, onFocusHandled, focusMode, setFocusMode, refreshTick = 0, obsidianStatus, onNeedRegister, allowHtml = false }) {
           const [state, setState] = React.useState({ status: 'loading' })
           const [doc, setDoc] = React.useState(null)
           const [editor, setEditor] = React.useState(null)
@@ -2996,7 +3112,7 @@ function CalcCard({ t }) {
                         : null,
                     ),
                   ),
-                  h(MarkdownBody, { text: doc.text, t, basePath: String(doc.path).split('/').slice(0, -1).join('/') }),
+                  h(MarkdownBody, { text: doc.text, t, allowHtml, basePath: String(doc.path).split('/').slice(0, -1).join('/') }),
                 )
 
           return h(CardShell, {
@@ -4413,7 +4529,7 @@ function CalcCard({ t }) {
           ensureStyles()
           const t = makeT(useLanguage())
           const [status, setStatus] = React.useState({ state: 'loading' })
-          const [draft, setDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '' })
+          const [draft, setDraft] = React.useState({ vaultRoot: '', sopDir: '00 资料库', recordingsDir: '会议记录', obsidianVaultName: '', allowHtml: false })
           const [busy, setBusy] = React.useState(false)
           const [pickerBusy, setPickerBusy] = React.useState(false)
           const [flash, setFlash] = React.useState(null)
@@ -4429,6 +4545,7 @@ function CalcCard({ t }) {
                   sopDir: data.sopDir ?? '00 资料库',
                   recordingsDir: data.recordingsDir ?? '会议记录',
                   obsidianVaultName: data.obsidianVaultName ?? '',
+                  allowHtml: data.allowHtml === true,
                 })
               },
               (error) => { if (alive) setStatus({ state: 'error', message: error.message }) },
@@ -4597,6 +4714,25 @@ function CalcCard({ t }) {
               field('资料库子目录（相对库根目录）', draft.sopDir, (value) => setDraft((current) => ({ ...current, sopDir: value }))),
               field('Obsidian 库名（可选；默认用文件夹名）', draft.obsidianVaultName, (value) => setDraft((current) => ({ ...current, obsidianVaultName: value }))),
               field('录音存放子目录', draft.recordingsDir, (value) => setDraft((current) => ({ ...current, recordingsDir: value }))),
+              h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '14px', fontSize: '13px', lineHeight: '1.6', cursor: 'pointer' } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draft.allowHtml === true,
+                  style: { marginTop: '3px' },
+                  onChange: (event) => {
+                    const next = event.target.checked
+                    if (next && typeof window.confirm === 'function') {
+                      const ok = window.confirm('启用后，笔记里写的原始 HTML / <script> 会在工作台内执行。只在你信任笔记来源时开启。\n\n确认启用？')
+                      if (!ok) return
+                    }
+                    setDraft((current) => ({ ...current, allowHtml: next }))
+                  },
+                }),
+                h('span', null,
+                  h('strong', null, '允许笔记中的原始 HTML'),
+                  h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, '（默认关闭；勾选启用时会二次确认）'),
+                ),
+              ),
               h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' } },
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'primary', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),
                 h('button', { type: 'button', className: 'dsh-wb-btn', onClick: () => { if (typeof close === 'function') close() } }, '关闭'),

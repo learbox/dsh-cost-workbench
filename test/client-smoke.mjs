@@ -119,6 +119,13 @@ if (typeof plugin._md === 'function') {
   check('删除线渲染成 del', html.includes('<del>'))
   check('双链渲染成 wikilink', html.includes('dsh-wb-wikilink'))
   check('Obsidian 图片转成附件 URL', html.includes('dsh-wb-md-img') && html.includes('/attachment?name='))
+
+  const safeHtml = plugin._md('<script>alert(1)</script>')
+  check('默认转义原始 HTML', !safeHtml.includes('<script>'), safeHtml.slice(0, 160))
+  const allowedHtml = plugin._md('<script>alert(1)</script>', '', true)
+  check('开启后保留原始 HTML', allowedHtml.includes('<script>'), allowedHtml.slice(0, 160))
+  const mermaidHtml = plugin._md('```mermaid\ngraph TD;\nA-->B;\n```')
+  check('mermaid 代码块带 language-mermaid', mermaidHtml.includes('language-mermaid'), mermaidHtml.slice(0, 200))
 }
 
 const registered = []
