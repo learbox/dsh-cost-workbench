@@ -3598,8 +3598,10 @@ function CalcCard({ t }) {
               const ratio = Math.max(0.04, Math.min(1, peak / max))
               const barHeight = Math.max(3, ratio * (height - 6))
               const position = (index + 0.5) / list.length
-              // 设了 A-B：只高亮区间内；否则按已播放进度高亮
-              const highlighted = hasAb ? (position >= abRatio.a && position <= abRatio.b) : position <= played
+              // 播放进度填充：没设 A-B 时从 0 填到当前位置；设了 A-B 时只填区间内「A → 当前位置」
+              const highlighted = hasAb
+                ? position <= played && position >= abRatio.a && position <= abRatio.b
+                : position <= played
               ctx.fillStyle = highlighted ? brand : idle
               ctx.fillRect(index * slot + (slot - barWidth) / 2, (height - barHeight) / 2, barWidth, barHeight)
             })
