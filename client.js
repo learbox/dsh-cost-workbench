@@ -3573,8 +3573,8 @@ function CalcCard({ t }) {
             h('rect', { x: 13.4, y: 5, width: 3.6, height: 14, rx: 1, fill: 'currentColor' }))
         }
 
-        /** canvas 波形：按峰值归一化，已播放段用品牌色，其余用弱色。 */
-        function Waveform({ peaks, progress, onSeek }) {
+        /** canvas 波形：按峰值归一化，已播放段用品牌色，其余用弱色；abRatio 画 A/B 循环标记。 */
+        function Waveform({ peaks, progress, onSeek, abRatio }) {
           const ref = React.useRef(null)
           const dragging = React.useRef(false)
           React.useEffect(() => {
@@ -3598,7 +3598,18 @@ function CalcCard({ t }) {
               ctx.fillStyle = (index + 0.5) / list.length <= played ? brand : idle
               ctx.fillRect(index * slot + (slot - barWidth) / 2, (height - barHeight) / 2, barWidth, barHeight)
             })
-          }, [peaks, progress])
+            // A-B 循环标记：两条竖线
+            if (abRatio !== null && abRatio !== undefined) {
+              const mark = (value) => {
+                if (typeof value !== 'number' || !Number.isFinite(value)) return
+                const x = Math.max(0, Math.min(1, value)) * width
+                ctx.fillStyle = brand
+                ctx.fillRect(x - 1, 0, 2, height)
+              }
+              mark(abRatio.a)
+              mark(abRatio.b)
+            }
+          }, [peaks, progress, abRatio])
           const seekFrom = (event) => {
             const rect = event.currentTarget.getBoundingClientRect()
             const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
@@ -3683,6 +3694,8 @@ function CalcCard({ t }) {
           const [playing, setPlaying] = React.useState(false)
           const [rate, setRate] = React.useState(1)
           const [progress, setProgress] = React.useState({ time: 0, duration: 0 })
+          const [ab, setAb] = React.useState({ a: null, b: null })
+          const abRef = React.useRef({ a: null, b: null })
           const [confirming, setConfirming] = React.useState(false)
           const [renaming, setRenaming] = React.useState(null)
           const [annotations, setAnnotations] = React.useState([])
@@ -4247,6 +4260,28 @@ function CalcCard({ t }) {
             seekTo(Math.max(0, Math.min(1, ratio)) * totalDuration())
           }
 
+          /** A-B 循环：第一次设 A（当前时间），第二次设 B，第三次清除；播放到 B 自动跳回 A。 */
+          function cycleAb() {
+            const audio = audioRef.current
+            const now = audio !== null && Number.isFinite(audio.currentTime) ? audio.currentTime : progress.time
+            const current = abRef.current
+            let next
+            if (current.a === null) {
+              next = { a: now, b: null }
+            } else if (current.b === null) {
+              next = now > current.a + 0.3 ? { a: current.a, b: now } : { a: current.a, b: null }
+            } else {
+              next = { a: null, b: null }
+            }
+            abRef.current = next
+            setAb(next)
+            if (typeof setFlash === 'function') {
+              setFlash(next.b !== null
+                ? 'A-B 循环：' + formatClock(next.a) + ' – ' + formatClock(next.b)
+                : (next.a !== null ? 'A 点已设：' + formatClock(next.a) + '；播放到想停的位置再点一次设 B' : '已清除 A-B'))
+            }
+          }
+
           const items = list.items
           const dur = progress.duration
           const peaks = selected?.peaks
@@ -4339,17 +4374,31 @@ function CalcCard({ t }) {
               ref: audioRef,
               src: API + '/recordings/' + encodeURIComponent(selected.id) + '/audio',
               preload: 'auto',
-              onTimeUpdate: (event) => setProgress({ time: event.target.currentTime, duration: Number.isFinite(event.target.duration) ? event.target.duration : 0 }),
+              onTimeUpdate: (event) => {
+                const audio = event.target
+                const current = abRef.current
+                if (current.a !== null && current.b !== null && current.b > current.a && audio.currentTime >= current.b - 0.05) {
+                  audio.currentTime = current.a
+                }
+                setProgress({ time: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
+              },
               onDurationChange: (event) => setProgress((current) => ({ ...current, duration: Number.isFinite(event.target.duration) ? event.target.duration : 0 })),
               onLoadedMetadata: (event) => setProgress({ time: 0, duration: event.target.duration || 0 }),
               onEnded: () => setPlaying(false),
               style: { position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' },
             }),
-            h(Waveform, { peaks, progress: dur > 0 ? progress.time / dur : 0, onSeek: seekRatio }),
+            h(Waveform, { peaks, progress: dur > 0 ? progress.time / dur : 0, onSeek: seekRatio, abRatio: ab.a !== null && ab.b !== null && dur > 0 ? { a: ab.a / dur, b: ab.b / dur } : null }),
             h('div', { className: 'dsh-wb-transport' },
               h('button', { type: 'button', className: 'dsh-wb-round', title: '后退 15 秒', onClick: () => skip(-15) }, h(IconRewind15, null)),
               h('button', { type: 'button', className: 'dsh-wb-round', 'data-primary': true, title: playing ? '暂停播放' : '播放', onClick: togglePlay }, playing ? h(IconPause, null) : h(IconPlay, null)),
               h('button', { type: 'button', className: 'dsh-wb-round', title: '前进 15 秒', onClick: () => skip(15) }, h(IconForward15, null)),
+              h('button', {
+                type: 'button',
+                className: 'dsh-wb-btn',
+                'data-tone': ab.b !== null ? 'primary' : 'quiet',
+                title: 'A-B 循环：第一次点设 A 点，第二次点设 B 点，第三次清除',
+                onClick: cycleAb,
+              }, ab.a === null ? 'A-B' : (ab.b === null ? '设B' : 'A-B')),
               h('span', { className: 'dsh-wb-transport-label' }, formatClock(progress.time) + ' / ' + formatClock(dur)),
               h('span', { className: 'dsh-wb-transport-gap' }),
               h('button', { type: 'button', className: 'dsh-wb-rate', title: '播放速度', onClick: cycleRate }, rate + '×'),
