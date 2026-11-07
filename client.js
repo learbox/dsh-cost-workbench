@@ -4274,6 +4274,22 @@ function CalcCard({ t }) {
               // 元数据没就绪时忽略
             }
             setProgress({ time: target, duration: total })
+            // 诊断：记录点击瞬间音频对象的真实状态（只记数字），写入 client-errors.log
+            try {
+              void api('/client-log', {
+                method: 'POST',
+                body: {
+                  where: 'seek',
+                  message: 'target=' + target.toFixed(2)
+                    + ' rs=' + audio.readyState
+                    + ' dur=' + (Number.isFinite(audio.duration) ? audio.duration.toFixed(2) : '-1')
+                    + ' cur=' + (Number.isFinite(audio.currentTime) ? audio.currentTime.toFixed(2) : '-1')
+                    + ' paused=' + audio.paused,
+                },
+              }).catch(() => {})
+            } catch {
+              // 诊断失败不影响播放
+            }
             if (typeof setFlash === 'function') setFlash('跳到 ' + formatClock(target))
           }
 
