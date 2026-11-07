@@ -3728,6 +3728,9 @@ function CalcCard({ t }) {
             audioRef.current = audio
             return () => {
               audio.pause()
+              // 彻底释放旧实例，避免切换录音后旧音频还在后台播放
+              audio.removeAttribute('src')
+              try { audio.load() } catch {}
               audio.removeEventListener('timeupdate', onTime)
               audio.removeEventListener('durationchange', onDuration)
               audio.removeEventListener('loadedmetadata', onLoaded)
@@ -4269,9 +4272,10 @@ function CalcCard({ t }) {
                 // 元数据未就绪时忽略
               }
             }
-            if (audio.readyState >= 1) apply()
+            const ready = audio.readyState >= 1 && Number.isFinite(audio.duration)
+            if (ready) apply()
             else {
-              // 还没元数据：等 loadedmetadata 再设置（不调用 load，避免重置到 0）
+              // 元数据/时长还没就绪：等 loadedmetadata 再设置（不调用 load，避免重置到 0）
               const once = () => {
                 audio.removeEventListener('loadedmetadata', once)
                 apply()
