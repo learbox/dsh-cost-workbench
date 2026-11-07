@@ -3771,6 +3771,10 @@ function CalcCard({ t }) {
             const position = currentPosition()
             offsetRef.current = position
             stopSource()
+            // 挂起整个 AudioContext：即使有漏网音源也绝对无声
+            if (playCtxRef.current !== null) {
+              try { void playCtxRef.current.suspend().catch(() => {}) } catch {}
+            }
             setPlaying(false)
             setProgress({ time: position, duration: durationOf() })
           }
@@ -4330,7 +4334,8 @@ function CalcCard({ t }) {
           }
 
           function togglePlay() {
-            if (playing) { pausePlayback(); return }
+            // 用「实际是否有音源」判断，而不是可能不同步的 state
+            if (sourceRef.current !== null) { pausePlayback(); return }
             if (audioBufferRef.current === null) {
               if (typeof setFlash === 'function') setFlash('音频还在加载…')
               return
@@ -4359,7 +4364,7 @@ function CalcCard({ t }) {
             if (total <= 0) return
             const target = Math.max(0, Math.min(total, Number(seconds) || 0))
             offsetRef.current = target
-            if (playing && sourceRef.current !== null) startAt(target)
+            if (sourceRef.current !== null) startAt(target)
             else setProgress({ time: target, duration: total })
             if (typeof setFlash === 'function') setFlash('跳到 ' + formatClock(target))
           }
