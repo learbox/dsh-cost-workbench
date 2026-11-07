@@ -1860,40 +1860,43 @@ const WB_CALC = {
         /** 会话头部的 DeepSeek 余额角标（账号余额优先，API Key 回退）。 */
         function HeaderUsageBadge() {
           const [balance, setBalance] = React.useState(null)
-          React.useEffect(() => {
-            let alive = true
-            const load = async () => {
-              const account = await readAccountBalance()
-              if (!alive) return
-              if (account !== null) {
-                setBalance(account)
-                return
-              }
-              try {
-                const data = await api('/usage')
-                if (!alive) return
-                const deepseek = data !== null && data.deepseek !== undefined ? data.deepseek : null
-                setBalance(deepseek !== null && deepseek.configured === true ? deepseek : null)
-              } catch {
-                if (alive) setBalance(null)
-              }
+          const refresh = React.useCallback(async () => {
+            const account = await readAccountBalance()
+            if (account !== null) { setBalance(account); return }
+            try {
+              const data = await api('/usage')
+              const deepseek = data !== null && data.deepseek !== undefined ? data.deepseek : null
+              setBalance(deepseek !== null && deepseek.configured === true ? deepseek : null)
+            } catch {
+              setBalance(null)
             }
-            void load()
-            const timer = setInterval(() => { void load() }, 60000)
-            return () => { alive = false; clearInterval(timer) }
           }, [])
+          React.useEffect(() => {
+            void refresh()
+            const timer = setInterval(() => { void refresh() }, 60000)
+            return () => clearInterval(timer)
+          }, [refresh])
           if (balance === null || balance.configured !== true || balance.error !== undefined) return null
           const total = Number(balance.total)
           if (!Number.isFinite(total)) return null
           const symbol = balance.currency === 'USD' ? '$' : '¥'
+          let pricing = null
+          try { pricing = deepseekPricingNow() } catch { pricing = null }
+          const title = [
+            'DeepSeek 账户余额（账号登录态）',
+            '余额：' + symbol + total.toFixed(2),
+            pricing !== null ? '当前价格：' + pricing.label + (pricing.next !== '' ? '（下次切换 ' + pricing.next + '）' : '') : '',
+            '点击刷新',
+          ].filter((line) => line !== '').join('\n')
           return h('button', {
             type: 'button',
-            title: 'DeepSeek 账户余额（账号登录态）',
+            title,
+            onClick: () => { void refresh() },
             style: {
               display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
               borderRadius: '999px', border: '1px solid var(--dsw-alias-border-l1)',
               background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)',
-              fontSize: '12px', lineHeight: '18px', cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0,
+              fontSize: '12px', lineHeight: '18px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
             },
           },
             h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'DeepSeek'),
