@@ -3592,10 +3592,15 @@ function CalcCard({ t }) {
             const played = Math.max(0, Math.min(1, progress || 0))
             const slot = width / list.length
             const barWidth = Math.max(1.5, slot * 0.55)
+            const hasAb = abRatio !== null && abRatio !== undefined
+              && typeof abRatio.a === 'number' && typeof abRatio.b === 'number' && abRatio.b > abRatio.a
             list.forEach((peak, index) => {
               const ratio = Math.max(0.04, Math.min(1, peak / max))
               const barHeight = Math.max(3, ratio * (height - 6))
-              ctx.fillStyle = (index + 0.5) / list.length <= played ? brand : idle
+              const position = (index + 0.5) / list.length
+              // 设了 A-B：只高亮区间内；否则按已播放进度高亮
+              const highlighted = hasAb ? (position >= abRatio.a && position <= abRatio.b) : position <= played
+              ctx.fillStyle = highlighted ? brand : idle
               ctx.fillRect(index * slot + (slot - barWidth) / 2, (height - barHeight) / 2, barWidth, barHeight)
             })
             // A-B 循环标记：两条竖线
