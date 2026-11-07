@@ -4233,26 +4233,17 @@ function CalcCard({ t }) {
             const total = totalDuration()
             if (audio === null || total <= 0) return
             const target = Math.max(0, Math.min(total, Number(seconds) || 0))
-            const apply = () => {
-              try {
-                audio.currentTime = target
-              } catch {
-                // 元数据还没加载时先记下，loadedmetadata 后再落一次
-              }
-            }
-            if (audio.readyState >= 1) {
-              apply()
-            } else {
-              // 还没有元数据：先触发加载，等 metadata 到了再定位（否则 currentTime 会被忽略）
-              const onReady = () => {
-                audio.removeEventListener('loadedmetadata', onReady)
-                apply()
-              }
-              audio.addEventListener('loadedmetadata', onReady)
-              try { audio.load() } catch {}
-              setTimeout(() => { if (audio.readyState >= 1) apply() }, 250)
+            const wasPlaying = audio.paused === false
+            try {
+              // 显式暂停 → 定位 → 恢复播放；不调用 load()，避免把音频重置回开头
+              audio.pause()
+              audio.currentTime = target
+              if (wasPlaying) void audio.play().catch(() => {})
+            } catch {
+              // 元数据没就绪时忽略
             }
             setProgress({ time: target, duration: total })
+            if (typeof setFlash === 'function') setFlash('跳到 ' + formatClock(target))
           }
 
           /** 波形给的是 0–1 的比例，直接按比例定位，不依赖外部算好的秒数。 */
