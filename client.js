@@ -3707,6 +3707,37 @@ function CalcCard({ t }) {
           const [liveLines, setLiveLines] = React.useState([])
           const [silentFor, setSilentFor] = React.useState(0)
           const audioRef = React.useRef(null)
+          // 手动创建 Audio 对象：不放进 React 树，避免每次 setProgress 重渲染时媒体元素被重建
+          // （重建会把 currentTime 重置到 0，表现就是「点波形从头播放」）。
+          React.useEffect(() => {
+            if (selected === null || selected === undefined || typeof selected.id !== 'string') return undefined
+            const audio = new Audio(API + '/recordings/' + encodeURIComponent(selected.id) + '/audio')
+            audio.preload = 'auto'
+            audio.playbackRate = rate
+            const onTime = () => {
+              const current = abRef.current
+              if (current.a !== null && current.b !== null && current.b > current.a && audio.currentTime >= current.b - 0.05) {
+                audio.currentTime = current.a
+              }
+              setProgress({ time: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
+            }
+            const onDuration = () => setProgress((current) => ({ ...current, duration: Number.isFinite(audio.duration) ? audio.duration : 0 }))
+            const onLoaded = () => setProgress({ time: 0, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
+            const onEnded = () => setPlaying(false)
+            audio.addEventListener('timeupdate', onTime)
+            audio.addEventListener('durationchange', onDuration)
+            audio.addEventListener('loadedmetadata', onLoaded)
+            audio.addEventListener('ended', onEnded)
+            audioRef.current = audio
+            return () => {
+              audio.pause()
+              audio.removeEventListener('timeupdate', onTime)
+              audio.removeEventListener('durationchange', onDuration)
+              audio.removeEventListener('loadedmetadata', onLoaded)
+              audio.removeEventListener('ended', onEnded)
+              if (audioRef.current === audio) audioRef.current = null
+            }
+          }, [selected === null || selected === undefined ? '' : selected.id])
           const bufferRef = React.useRef(new Int16Array(0))
           const statusRef = React.useRef('idle')
           const sessionRef = React.useRef({
@@ -4361,23 +4392,6 @@ function CalcCard({ t }) {
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', title: '删除这条录音', 'aria-label': '删除这条录音', onClick: () => setConfirming(true) }, h(IconTrash, { size: 15 })),
               ),
             ),
-            h('audio', {
-              ref: audioRef,
-              src: API + '/recordings/' + encodeURIComponent(selected.id) + '/audio',
-              preload: 'auto',
-              onTimeUpdate: (event) => {
-                const audio = event.target
-                const current = abRef.current
-                if (current.a !== null && current.b !== null && current.b > current.a && audio.currentTime >= current.b - 0.05) {
-                  audio.currentTime = current.a
-                }
-                setProgress({ time: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
-              },
-              onDurationChange: (event) => setProgress((current) => ({ ...current, duration: Number.isFinite(event.target.duration) ? event.target.duration : 0 })),
-              onLoadedMetadata: (event) => setProgress({ time: 0, duration: event.target.duration || 0 }),
-              onEnded: () => setPlaying(false),
-              style: { position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' },
-            }),
             h(Waveform, { peaks, progress: dur > 0 ? progress.time / dur : 0, onSeek: seekRatio, abRatio: ab.a !== null && ab.b !== null && dur > 0 ? { a: ab.a / dur, b: ab.b / dur } : null }),
             h('div', { className: 'dsh-wb-transport' },
               h('button', { type: 'button', className: 'dsh-wb-round', title: '后退 15 秒', onClick: () => skip(-15) }, h(IconRewind15, null)),
