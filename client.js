@@ -3578,6 +3578,7 @@ function CalcCard({ t }) {
           const ref = React.useRef(null)
           const dragging = React.useRef(false)
           const selecting = React.useRef(null)
+          const [preview, setPreview] = React.useState(null)
           React.useEffect(() => {
             const canvas = ref.current
             if (canvas === null) return
@@ -3593,31 +3594,33 @@ function CalcCard({ t }) {
             const played = Math.max(0, Math.min(1, progress || 0))
             const slot = width / list.length
             const barWidth = Math.max(1.5, slot * 0.55)
-            const hasAb = abRatio !== null && abRatio !== undefined
-              && typeof abRatio.a === 'number' && typeof abRatio.b === 'number' && abRatio.b > abRatio.a
+            // Shift 拖动时用预览区间，实时显示 A/B 位置
+            const ab = preview !== null && preview !== undefined ? preview : abRatio
+            const hasAb = ab !== null && ab !== undefined
+              && typeof ab.a === 'number' && typeof ab.b === 'number' && ab.b > ab.a
             list.forEach((peak, index) => {
               const ratio = Math.max(0.04, Math.min(1, peak / max))
               const barHeight = Math.max(3, ratio * (height - 6))
               const position = (index + 0.5) / list.length
               // 播放进度填充：没设 A-B 时从 0 填到当前位置；设了 A-B 时只填区间内「A → 当前位置」
               const highlighted = hasAb
-                ? position <= played && position >= abRatio.a && position <= abRatio.b
+                ? position <= played && position >= ab.a && position <= ab.b
                 : position <= played
               ctx.fillStyle = highlighted ? brand : idle
               ctx.fillRect(index * slot + (slot - barWidth) / 2, (height - barHeight) / 2, barWidth, barHeight)
             })
-            // A-B 循环标记：两条竖线
-            if (abRatio !== null && abRatio !== undefined) {
+            // A-B 循环标记：两条竖线（含拖动中的预览）
+            if (ab !== null && ab !== undefined) {
               const mark = (value) => {
                 if (typeof value !== 'number' || !Number.isFinite(value)) return
                 const x = Math.max(0, Math.min(1, value)) * width
                 ctx.fillStyle = brand
                 ctx.fillRect(x - 1, 0, 2, height)
               }
-              mark(abRatio.a)
-              mark(abRatio.b)
+              mark(ab.a)
+              mark(ab.b)
             }
-          }, [peaks, progress, abRatio])
+          }, [peaks, progress, abRatio, preview])
           const ratioAt = (event) => {
             const rect = event.currentTarget.getBoundingClientRect()
             return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
@@ -3636,6 +3639,7 @@ function CalcCard({ t }) {
               try { event.currentTarget.setPointerCapture(event.pointerId) } catch {}
               if (event.shiftKey && typeof onSelectAb === 'function') {
                 selecting.current = { start: ratioAt(event) }
+                setPreview({ a: selecting.current.start, b: selecting.current.start })
                 return
               }
               seekFrom(event)
@@ -3644,6 +3648,10 @@ function CalcCard({ t }) {
               if (!dragging.current) return
               if (selecting.current !== null) {
                 selecting.current.end = ratioAt(event)
+                setPreview({
+                  a: Math.min(selecting.current.start, selecting.current.end),
+                  b: Math.max(selecting.current.start, selecting.current.end),
+                })
                 return
               }
               seekFrom(event)
@@ -3653,6 +3661,7 @@ function CalcCard({ t }) {
               try { event.currentTarget.releasePointerCapture(event.pointerId) } catch {}
               const selection = selecting.current
               selecting.current = null
+              setPreview(null)
               if (selection !== null && typeof onSelectAb === 'function') {
                 const end = ratioAt(event)
                 const start = selection.start
@@ -3661,7 +3670,7 @@ function CalcCard({ t }) {
                 }
               }
             },
-            onPointerCancel: () => { dragging.current = false; selecting.current = null },
+            onPointerCancel: () => { dragging.current = false; selecting.current = null; setPreview(null) },
             onPointerLeave: (event) => {
               if (event.buttons === 0) dragging.current = false
             },
