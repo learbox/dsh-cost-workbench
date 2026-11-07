@@ -2138,7 +2138,17 @@ const WB_CALC = {
               },
               () => { if (alive) setUsage({ deepseek: null, volc: null }) },
             )
-            return () => { alive = false }
+            // 语音/DeepSeek 余额每 60 秒自动刷新（火山接口为只读查询，1 次/分钟远低于 QPS 限制）
+            const usageTimer = setInterval(() => {
+              api('/usage?refresh=1').then(
+                async (data) => {
+                  const account = await readAccountBalance()
+                  if (alive) setUsage({ deepseek: account !== null ? account : (data.deepseek ?? null), volc: data.volc ?? null })
+                },
+                () => {},
+              )
+            }, 60000)
+            return () => { alive = false; clearInterval(usageTimer) }
           }, [reloadKey, setup === null ? 'pending' : (setup.configured === true ? 'ready' : 'unconfigured')])
 
           React.useEffect(() => {
