@@ -3703,41 +3703,139 @@ function CalcCard({ t }) {
           const [findPos, setFindPos] = React.useState(0)
           const [liveLines, setLiveLines] = React.useState([])
           const [silentFor, setSilentFor] = React.useState(0)
-          const audioRef = React.useRef(null)
-          // 手动创建 Audio 对象：不放进 React 树，避免每次 setProgress 重渲染时媒体元素被重建
-          // （重建会把 currentTime 重置到 0，表现就是「点波形从头播放」）。
+          const audioRef = React.useRef(null) // 兼容保留（Web Audio 播放不再使用）
+          // Web Audio 播放：自己管理播放位置，绕开媒体元素 seek 不可靠的问题。
+          const playCtxRef = React.useRef(null)
+          const audioBufferRef = React.useRef(null)
+          const sourceRef = React.useRef(null)
+          const startedAtRef = React.useRef(0)
+          const offsetRef = React.useRef(0)
+          const rateRef = React.useRef(1)
+          rateRef.current = rate
+          const endGuardRef = React.useRef(false)
+
+          const ensurePlayCtx = () => {
+            if (playCtxRef.current === null) {
+              try { playCtxRef.current = new (window.AudioContext || window.webkitAudioContext)() } catch { playCtxRef.current = null }
+            }
+            if (playCtxRef.current !== null && playCtxRef.current.state === 'suspended') void playCtxRef.current.resume().catch(() => {})
+            return playCtxRef.current
+          }
+          const stopSource = () => {
+            const source = sourceRef.current
+            sourceRef.current = null
+            if (source !== null) {
+              endGuardRef.current = true
+              try { source.stop() } catch {}
+              try { source.disconnect() } catch {}
+            }
+          }
+          const durationOf = () => {
+            if (audioBufferRef.current !== null) return audioBufferRef.current.duration
+            const fallback = (selected?.item?.durationMs ?? 0) / 1000
+            return Number.isFinite(fallback) && fallback > 0 ? fallback : 0
+          }
+          const currentPosition = () => {
+            const ctx = playCtxRef.current
+            if (sourceRef.current !== null && ctx !== null) {
+              return Math.max(0, Math.min(durationOf(), offsetRef.current + (ctx.currentTime - startedAtRef.current) * rateRef.current))
+            }
+            return offsetRef.current
+          }
+          const startAt = (offset) => {
+            const ctx = ensurePlayCtx()
+            const buffer = audioBufferRef.current
+            if (ctx === null || buffer === null) return
+            stopSource()
+            const source = ctx.createBufferSource()
+            source.buffer = buffer
+            source.playbackRate.value = rateRef.current
+            source.connect(ctx.destination)
+            endGuardRef.current = false
+            source.onended = () => {
+              if (endGuardRef.current) return
+              endGuardRef.current = true
+              sourceRef.current = null
+              offsetRef.current = buffer.duration
+              setPlaying(false)
+              setProgress({ time: buffer.duration, duration: buffer.duration })
+            }
+            startedAtRef.current = ctx.currentTime
+            offsetRef.current = Math.max(0, Math.min(buffer.duration, Number(offset) || 0))
+            source.start(0, offsetRef.current)
+            sourceRef.current = source
+            setPlaying(true)
+            setProgress({ time: offsetRef.current, duration: buffer.duration })
+          }
+          const pausePlayback = () => {
+            const position = currentPosition()
+            offsetRef.current = position
+            stopSource()
+            setPlaying(false)
+            setProgress({ time: position, duration: durationOf() })
+          }
+          // 加载音频并解码到 AudioBuffer
           React.useEffect(() => {
             if (selected === null || selected === undefined || typeof selected.id !== 'string') return undefined
-            const audio = new Audio(API + '/recordings/' + encodeURIComponent(selected.id) + '/audio')
-            audio.preload = 'auto'
-            audio.playbackRate = rate
-            const onTime = () => {
-              const current = abRef.current
-              if (current.a !== null && current.b !== null && current.b > current.a && audio.currentTime >= current.b - 0.05) {
-                audio.currentTime = current.a
+            let alive = true
+            stopSource()
+            audioBufferRef.current = null
+            offsetRef.current = 0
+            setPlaying(false)
+            const fallbackMs = selected.item !== null && selected.item !== undefined ? Number(selected.item.durationMs) : 0
+            setProgress({ time: 0, duration: Number.isFinite(fallbackMs) && fallbackMs > 0 ? fallbackMs / 1000 : 0 })
+            const url = API + '/recordings/' + encodeURIComponent(selected.id) + '/audio'
+            void (async () => {
+              try {
+                const response = await fetch(url, { cache: 'no-store' })
+                if (!response.ok) throw new Error('HTTP ' + response.status)
+                const bytes = await response.arrayBuffer()
+                const ctx = ensurePlayCtx()
+                if (ctx === null) throw new Error('AudioContext 不可用')
+                const decoded = await ctx.decodeAudioData(bytes.slice(0))
+                if (!alive) return
+                audioBufferRef.current = decoded
+                setProgress({ time: 0, duration: decoded.duration })
+              } catch (error) {
+                if (alive && typeof setFlash === 'function') setFlash('音频加载失败：' + error.message)
               }
-              setProgress({ time: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
-            }
-            const onDuration = () => setProgress((current) => ({ ...current, duration: Number.isFinite(audio.duration) ? audio.duration : 0 }))
-            const onLoaded = () => setProgress({ time: 0, duration: Number.isFinite(audio.duration) ? audio.duration : 0 })
-            const onEnded = () => setPlaying(false)
-            audio.addEventListener('timeupdate', onTime)
-            audio.addEventListener('durationchange', onDuration)
-            audio.addEventListener('loadedmetadata', onLoaded)
-            audio.addEventListener('ended', onEnded)
-            audioRef.current = audio
+            })()
             return () => {
-              audio.pause()
-              // 彻底释放旧实例，避免切换录音后旧音频还在后台播放
-              audio.removeAttribute('src')
-              try { audio.load() } catch {}
-              audio.removeEventListener('timeupdate', onTime)
-              audio.removeEventListener('durationchange', onDuration)
-              audio.removeEventListener('loadedmetadata', onLoaded)
-              audio.removeEventListener('ended', onEnded)
-              if (audioRef.current === audio) audioRef.current = null
+              alive = false
+              stopSource()
+              offsetRef.current = 0
             }
           }, [selected === null || selected === undefined ? '' : selected.id])
+          // 播放进度刷新 + A-B 循环检测
+          React.useEffect(() => {
+            if (!playing) return undefined
+            const timer = setInterval(() => {
+              const position = currentPosition()
+              const total = durationOf()
+              const ab = abRef.current
+              if (ab.a !== null && ab.b !== null && ab.b > ab.a && position >= ab.b - 0.02) {
+                startAt(ab.a)
+                return
+              }
+              if (position >= total - 0.02) {
+                stopSource()
+                offsetRef.current = total
+                setPlaying(false)
+                setProgress({ time: total, duration: total })
+                return
+              }
+              setProgress({ time: position, duration: total })
+            }, 100)
+            return () => clearInterval(timer)
+          }, [playing, rate, selected === null || selected === undefined ? '' : selected.id])
+          // 卸载时关闭 AudioContext
+          React.useEffect(() => () => {
+            stopSource()
+            if (playCtxRef.current !== null) {
+              try { playCtxRef.current.close() } catch {}
+              playCtxRef.current = null
+            }
+          }, [])
           const bufferRef = React.useRef(new Int16Array(0))
           const statusRef = React.useRef('idle')
           const sessionRef = React.useRef({
@@ -4232,85 +4330,48 @@ function CalcCard({ t }) {
           }
 
           function togglePlay() {
-            const audio = audioRef.current
-            if (audio === null) return
-            if (audio.paused) { void audio.play(); setPlaying(true) }
-            else { audio.pause(); setPlaying(false) }
+            if (playing) { pausePlayback(); return }
+            if (audioBufferRef.current === null) {
+              if (typeof setFlash === 'function') setFlash('音频还在加载…')
+              return
+            }
+            startAt(offsetRef.current)
           }
 
           function skip(seconds) {
-            const audio = audioRef.current
-            if (audio === null) return
-            audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + seconds))
-            setProgress({ time: audio.currentTime, duration: audio.duration || 0 })
+            seekTo(currentPosition() + Number(seconds || 0))
           }
 
           function cycleRate() {
             const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1
             setRate(next)
-            if (audioRef.current !== null) audioRef.current.playbackRate = next
+            rateRef.current = next
+            if (playing) startAt(currentPosition())
           }
 
-          /** 这段音频的真实总长：优先 audio 元数据，其次列表里的 durationMs。 */
+          /** 这段音频的真实总长（AudioBuffer 解码后的时长）。 */
           function totalDuration() {
-            const audio = audioRef.current
-            if (audio !== null && Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration
-            const fallback = (selected?.item?.durationMs ?? 0) / 1000
-            return Number.isFinite(fallback) && fallback > 0 ? fallback : 0
+            return durationOf()
           }
 
           function seekTo(seconds) {
-            const audio = audioRef.current
-            const total = totalDuration()
-            if (audio === null || total <= 0) return
+            const total = durationOf()
+            if (total <= 0) return
             const target = Math.max(0, Math.min(total, Number(seconds) || 0))
-            const apply = () => {
-              try {
-                // 直接设置位置：播放中 seek 由浏览器处理，不 pause/play，避免被重置回开头
-                audio.currentTime = target
-              } catch {
-                // 元数据未就绪时忽略
-              }
-            }
-            const ready = audio.readyState >= 1 && Number.isFinite(audio.duration)
-            if (ready) apply()
-            else {
-              // 元数据/时长还没就绪：等 loadedmetadata 再设置（不调用 load，避免重置到 0）
-              const once = () => {
-                audio.removeEventListener('loadedmetadata', once)
-                apply()
-              }
-              audio.addEventListener('loadedmetadata', once)
-            }
-            setProgress({ time: target, duration: total })
-            // 诊断：记录点击瞬间音频对象的真实状态（只记数字），写入 client-errors.log
-            try {
-              void api('/client-log', {
-                method: 'POST',
-                body: {
-                  where: 'seek',
-                  message: 'target=' + target.toFixed(2)
-                    + ' rs=' + audio.readyState
-                    + ' dur=' + (Number.isFinite(audio.duration) ? audio.duration.toFixed(2) : '-1')
-                    + ' cur=' + (Number.isFinite(audio.currentTime) ? audio.currentTime.toFixed(2) : '-1')
-                    + ' paused=' + audio.paused,
-                },
-              }).catch(() => {})
-            } catch {
-              // 诊断失败不影响播放
-            }
+            offsetRef.current = target
+            if (playing && sourceRef.current !== null) startAt(target)
+            else setProgress({ time: target, duration: total })
             if (typeof setFlash === 'function') setFlash('跳到 ' + formatClock(target))
           }
 
           /** 波形给的是 0–1 的比例，直接按比例定位，不依赖外部算好的秒数。 */
           function seekRatio(ratio) {
-            seekTo(Math.max(0, Math.min(1, ratio)) * totalDuration())
+            seekTo(Math.max(0, Math.min(1, ratio)) * durationOf())
           }
 
           /** A-B 循环：第一次设 A（当前时间），第二次设 B，第三次清除；播放到 B 自动跳回 A。 */
           function cycleAb() {
-            const audio = audioRef.current
-            const now = audio !== null && Number.isFinite(audio.currentTime) ? audio.currentTime : progress.time
+            const now = currentPosition()
             const current = abRef.current
             let next
             if (current.a === null) {
