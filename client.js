@@ -3631,6 +3631,9 @@ function CalcCard({ t }) {
             const rect = event.currentTarget.getBoundingClientRect()
             return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
           }
+          // A-B 激活时：普通点击/拖动不再跳转（Shift 拖选仍可重设区间）
+          const abLocked = abRatio !== null && abRatio !== undefined
+            && typeof abRatio.a === 'number' && typeof abRatio.b === 'number' && abRatio.b > abRatio.a
           const seekFrom = (event) => {
             if (typeof onSeek === 'function') onSeek(ratioAt(event))
           }
@@ -3648,6 +3651,7 @@ function CalcCard({ t }) {
                 setPreview({ a: selecting.current.start, b: selecting.current.start })
                 return
               }
+              if (abLocked) return
               seekFrom(event)
             },
             onPointerMove: (event) => {
@@ -3660,6 +3664,7 @@ function CalcCard({ t }) {
                 })
                 return
               }
+              if (abLocked) return
               seekFrom(event)
             },
             onPointerUp: (event) => {
