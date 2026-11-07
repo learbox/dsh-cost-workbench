@@ -4264,14 +4264,22 @@ function CalcCard({ t }) {
             const total = totalDuration()
             if (audio === null || total <= 0) return
             const target = Math.max(0, Math.min(total, Number(seconds) || 0))
-            const wasPlaying = audio.paused === false
-            try {
-              // 显式暂停 → 定位 → 恢复播放；不调用 load()，避免把音频重置回开头
-              audio.pause()
-              audio.currentTime = target
-              if (wasPlaying) void audio.play().catch(() => {})
-            } catch {
-              // 元数据没就绪时忽略
+            const apply = () => {
+              try {
+                // 直接设置位置：播放中 seek 由浏览器处理，不 pause/play，避免被重置回开头
+                audio.currentTime = target
+              } catch {
+                // 元数据未就绪时忽略
+              }
+            }
+            if (audio.readyState >= 1) apply()
+            else {
+              // 还没元数据：等 loadedmetadata 再设置（不调用 load，避免重置到 0）
+              const once = () => {
+                audio.removeEventListener('loadedmetadata', once)
+                apply()
+              }
+              audio.addEventListener('loadedmetadata', once)
             }
             setProgress({ time: target, duration: total })
             // 诊断：记录点击瞬间音频对象的真实状态（只记数字），写入 client-errors.log
