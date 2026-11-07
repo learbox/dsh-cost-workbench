@@ -3634,9 +3634,6 @@ function CalcCard({ t }) {
               dragging.current = false
               try { event.currentTarget.releasePointerCapture(event.pointerId) } catch {}
             },
-            // 兜底：某些环境 pointer 事件被吞掉时，普通点击也能定位
-            onClick: (event) => { seekFrom(event) },
-            onClick: (event) => { seekFrom(event) },
             onPointerCancel: () => { dragging.current = false },
             onPointerLeave: (event) => {
               if (event.buttons === 0) dragging.current = false
