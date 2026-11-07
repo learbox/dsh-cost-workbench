@@ -1979,7 +1979,14 @@ const WB_CALC = {
           const [pending, setPending] = React.useState(null)
           const [flash, setFlash] = React.useState(null)
           const [reloadKey, setReloadKey] = React.useState(0)
-          const [activeId, setActiveId] = React.useState(null)
+          // 记住上次激活的标签页：重启/重开后回到同一页
+          const [activeId, setActiveId] = React.useState(() => {
+            try {
+              return localStorage.getItem('dsh-cost-workbench.activeCard')
+            } catch {
+              return null
+            }
+          })
           const [query, setQuery] = React.useState('')
           const [search, setSearch] = React.useState({ status: 'idle' })
           const [focusNote, setFocusNote] = React.useState(null)
@@ -1987,6 +1994,16 @@ const WB_CALC = {
           const [focusMode, setFocusMode] = React.useState(false)
           /** 顶部刷新按钮的计数：卡片据此重新拉取自己的数据（SOP 不再自带刷新按钮）。 */
           const [refreshTick, setRefreshTick] = React.useState(0)
+
+          // 激活的标签页变化时记住，重启后恢复（卡片被删除/不存在时由加载逻辑回退到默认页）
+          React.useEffect(() => {
+            if (activeId === null || typeof activeId !== 'string' || activeId === '') return
+            try {
+              localStorage.setItem('dsh-cost-workbench.activeCard', activeId)
+            } catch {
+              // localStorage 不可用时忽略
+            }
+          }, [activeId])
           const [fontSize, setFontSize] = React.useState(() => {
             try {
               const stored = Number(window.localStorage.getItem('dsh-workbench:fontSize'))
