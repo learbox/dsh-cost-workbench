@@ -3574,9 +3574,10 @@ function CalcCard({ t }) {
         }
 
         /** canvas 波形：按峰值归一化，已播放段用品牌色，其余用弱色；abRatio 画 A/B 循环标记。 */
-        function Waveform({ peaks, progress, onSeek, abRatio }) {
+        function Waveform({ peaks, progress, onSeek, abRatio, onSelectAb }) {
           const ref = React.useRef(null)
           const dragging = React.useRef(false)
+          const selecting = React.useRef(null)
           React.useEffect(() => {
             const canvas = ref.current
             if (canvas === null) return
@@ -3617,31 +3618,50 @@ function CalcCard({ t }) {
               mark(abRatio.b)
             }
           }, [peaks, progress, abRatio])
-          const seekFrom = (event) => {
+          const ratioAt = (event) => {
             const rect = event.currentTarget.getBoundingClientRect()
-            const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
-            if (typeof onSeek === 'function') onSeek(ratio)
+            return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+          }
+          const seekFrom = (event) => {
+            if (typeof onSeek === 'function') onSeek(ratioAt(event))
           }
           return h('canvas', {
             ref,
             width: 960,
             height: 88,
             className: 'dsh-wb-wave-canvas',
-            // 按下即可定位并开始拖动；pointer capture 保证拖出画布也继续跟随。
+            // 按下即可定位并开始拖动；Shift+拖动 = 框选 A-B 区间；pointer capture 保证拖出画布也继续跟随。
             onPointerDown: (event) => {
               dragging.current = true
               try { event.currentTarget.setPointerCapture(event.pointerId) } catch {}
+              if (event.shiftKey && typeof onSelectAb === 'function') {
+                selecting.current = { start: ratioAt(event) }
+                return
+              }
               seekFrom(event)
             },
             onPointerMove: (event) => {
               if (!dragging.current) return
+              if (selecting.current !== null) {
+                selecting.current.end = ratioAt(event)
+                return
+              }
               seekFrom(event)
             },
             onPointerUp: (event) => {
               dragging.current = false
               try { event.currentTarget.releasePointerCapture(event.pointerId) } catch {}
+              const selection = selecting.current
+              selecting.current = null
+              if (selection !== null && typeof onSelectAb === 'function') {
+                const end = ratioAt(event)
+                const start = selection.start
+                if (Math.abs(end - start) > 0.01) {
+                  onSelectAb({ a: Math.min(start, end), b: Math.max(start, end) })
+                }
+              }
             },
-            onPointerCancel: () => { dragging.current = false },
+            onPointerCancel: () => { dragging.current = false; selecting.current = null },
             onPointerLeave: (event) => {
               if (event.buttons === 0) dragging.current = false
             },
@@ -4422,7 +4442,21 @@ function CalcCard({ t }) {
                 h('button', { type: 'button', className: 'dsh-wb-btn', 'data-tone': 'quiet', title: '删除这条录音', 'aria-label': '删除这条录音', onClick: () => setConfirming(true) }, h(IconTrash, { size: 15 })),
               ),
             ),
-            h(Waveform, { peaks, progress: dur > 0 ? progress.time / dur : 0, onSeek: seekRatio, abRatio: ab.a !== null && ab.b !== null && dur > 0 ? { a: ab.a / dur, b: ab.b / dur } : null }),
+            h(Waveform, {
+              peaks,
+              progress: dur > 0 ? progress.time / dur : 0,
+              onSeek: seekRatio,
+              abRatio: ab.a !== null && ab.b !== null && dur > 0 ? { a: ab.a / dur, b: ab.b / dur } : null,
+              // Shift+拖动波形框选 A-B 区间
+              onSelectAb: (ratios) => {
+                const total = totalDuration()
+                if (total <= 0) return
+                const next = { a: Math.max(0, Math.min(1, ratios.a)) * total, b: Math.max(0, Math.min(1, ratios.b)) * total }
+                abRef.current = next
+                setAb(next)
+                if (typeof setFlash === 'function') setFlash('A-B 循环：' + formatClock(next.a) + ' – ' + formatClock(next.b))
+              },
+            }),
             h('div', { className: 'dsh-wb-transport' },
               h('button', { type: 'button', className: 'dsh-wb-round', title: '后退 15 秒', onClick: () => skip(-15) }, h(IconRewind15, null)),
               h('button', { type: 'button', className: 'dsh-wb-round', 'data-primary': true, title: playing ? '暂停播放' : '播放', onClick: togglePlay }, playing ? h(IconPause, null) : h(IconPlay, null)),
@@ -4431,7 +4465,7 @@ function CalcCard({ t }) {
                 type: 'button',
                 className: 'dsh-wb-btn',
                 'data-tone': ab.b !== null ? 'primary' : 'quiet',
-                title: 'A-B 循环：第一次点设 A 点，第二次点设 B 点，第三次清除',
+                title: 'A-B 循环：点击按当前播放位置设 A/B（第三次清除）；或按住 Shift 在波形上拖选区间',
                 onClick: cycleAb,
               }, ab.a === null ? 'A-B' : (ab.b === null ? '设B' : 'A-B')),
               h('span', { className: 'dsh-wb-transport-label' }, formatClock(progress.time) + ' / ' + formatClock(dur)),
