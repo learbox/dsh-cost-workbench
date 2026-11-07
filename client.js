@@ -3623,6 +3623,8 @@ function CalcCard({ t }) {
               dragging.current = false
               try { event.currentTarget.releasePointerCapture(event.pointerId) } catch {}
             },
+            // 兜底：某些环境 pointer 事件被吞掉时，普通点击也能定位
+            onClick: (event) => { seekFrom(event) },
             onClick: (event) => { seekFrom(event) },
             onPointerCancel: () => { dragging.current = false },
             onPointerLeave: (event) => {
@@ -4218,7 +4220,25 @@ function CalcCard({ t }) {
             const total = totalDuration()
             if (audio === null || total <= 0) return
             const target = Math.max(0, Math.min(total, Number(seconds) || 0))
-            audio.currentTime = target
+            const apply = () => {
+              try {
+                audio.currentTime = target
+              } catch {
+                // 元数据还没加载时先记下，loadedmetadata 后再落一次
+              }
+            }
+            if (audio.readyState >= 1) {
+              apply()
+            } else {
+              // 还没有元数据：先触发加载，等 metadata 到了再定位（否则 currentTime 会被忽略）
+              const onReady = () => {
+                audio.removeEventListener('loadedmetadata', onReady)
+                apply()
+              }
+              audio.addEventListener('loadedmetadata', onReady)
+              try { audio.load() } catch {}
+              setTimeout(() => { if (audio.readyState >= 1) apply() }, 250)
+            }
             setProgress({ time: target, duration: total })
           }
 
@@ -4323,7 +4343,7 @@ function CalcCard({ t }) {
               onDurationChange: (event) => setProgress((current) => ({ ...current, duration: Number.isFinite(event.target.duration) ? event.target.duration : 0 })),
               onLoadedMetadata: (event) => setProgress({ time: 0, duration: event.target.duration || 0 }),
               onEnded: () => setPlaying(false),
-              style: { display: 'none' },
+              style: { position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' },
             }),
             h(Waveform, { peaks, progress: dur > 0 ? progress.time / dur : 0, onSeek: seekRatio }),
             h('div', { className: 'dsh-wb-transport' },
