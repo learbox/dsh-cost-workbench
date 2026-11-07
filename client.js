@@ -3609,16 +3609,22 @@ function CalcCard({ t }) {
               ctx.fillStyle = highlighted ? brand : idle
               ctx.fillRect(index * slot + (slot - barWidth) / 2, (height - barHeight) / 2, barWidth, barHeight)
             })
-            // A-B 循环标记：两条竖线（含拖动中的预览）
+            // A-B 循环标记：区间淡色底 + 两条固定颜色的竖线（拖动预览与设置后一致）
             if (ab !== null && ab !== undefined) {
+              const start = Math.max(0, Math.min(1, ab.a))
+              const end = Math.max(0, Math.min(1, ab.b))
+              if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                ctx.fillStyle = 'rgba(229, 72, 77, 0.10)'
+                ctx.fillRect(start * width, 0, (end - start) * width, height)
+              }
+              ctx.fillStyle = '#e5484d'
               const mark = (value) => {
                 if (typeof value !== 'number' || !Number.isFinite(value)) return
                 const x = Math.max(0, Math.min(1, value)) * width
-                ctx.fillStyle = brand
                 ctx.fillRect(x - 1, 0, 2, height)
               }
-              mark(ab.a)
-              mark(ab.b)
+              mark(start)
+              mark(end)
             }
           }, [peaks, progress, abRatio, preview])
           const ratioAt = (event) => {
