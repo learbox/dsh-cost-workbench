@@ -48,11 +48,13 @@ scripts/           install.ps1（装机，-Uninstall 卸载）、seed-vault.ps1�
 客户端打开面板时 `POST /context { sessionId }`；Host 读 `~/.dsh/storages/workspace.json`
 （可用 `workspaceIndexFile` 覆盖，测试用），把该会话绑定的工作区路径当作项目根。
 只有工作区根存在隐藏标记 `.dsh-cost-workbench.json` 且 `project: true` 才进入项目模式；
-未标记或 `project: false`（普通工作区）回退公共库。工作区类型切换入口是工具栏右侧按钮：
+未标记（以及通过按钮「转为普通」后删除标记）的工作区回退公共库。工作区类型切换入口是工具栏右侧按钮：
 造价工作区显示「转为普通工作区」、否则显示「转为造价工作区」，点它调用 `markProject(enable)` →
 `/context/mark`；**显示模式跟随工作区类型**（造价项目=造价模式、普通=普通模式），不再手动切模式。
-`/context/status` 是只读查询（入口按钮据此隐藏已标记 plain 的工作区），`/context/mark { enable }` 写标记
-并按需初始化；两者都要过 `readWorkspaceMarker()`。
+`/context/status` 是只读查询（入口按钮据此隐藏历史遗留的 plain 标记），`/context/mark { enable }`
+`true` 写标记并初始化、`false` **删除标记文件**（转为普通）；两者都要过 `readWorkspaceMarker()`。
+普通/未标记会话里，DSH 恢复出来的右栏工作台会被自动关闭（`WorkbenchPanel` 的 effect 用
+`getService('sidebarRight')` 判断，用户主动打开的不受影响）。
 进入项目模式后 `rebuild()`：
 
 - `vaultRoot = 项目根`，`sopDir = ''`（资料库就是项目文件夹本身）
@@ -75,9 +77,9 @@ scripts/           install.ps1（装机，-Uninstall 卸载）、seed-vault.ps1�
 ```
 GET    /attachment?path=<相对项目根的路径>   只读图片附件（也支持 ?name=<文件名> 在项目根内按名查找）
 GET    /vendor?name=mermaid.min.js|highlight.min.js   按需下发 vendor 脚本（白名单）
-GET    /context/status?sessionId=   只读查询工作区标记（none / project / plain）
+GET    /context/status?sessionId=   只读查询工作区标记（none / project；历史 plain 文件兼容读取）
 POST   /context                     解析会话工作区并重建（sessionId 为空 = 回退公共库）
-POST   /context/mark { enable }     写当前会话工作区的标记：true=造价项目（初始化目录）/ false=普通工作区
+POST   /context/mark { enable }     true=写项目标记并初始化；false=删除标记文件（转为普通工作区）
 POST   /project/mark { path, enable }  对任意已存在目录写标记并初始化（当前无 UI 调用者，保留给脚本/后续入口）
 ```
 
