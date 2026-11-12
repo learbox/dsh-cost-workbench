@@ -2031,6 +2031,33 @@ const WB_CALC = {
               // localStorage 不可用时忽略
             }
           }, [activeId])
+
+          // 普通工作区（plain）完全静默：DSH 新建会话会沿用上次的右栏布局，
+          // 若右栏正显示工作台就自动收起，避免普通文件夹下也弹出面板。
+          React.useEffect(() => {
+            const id = typeof props.sessionId === 'string' ? props.sessionId : ''
+            if (id === '') return undefined
+            let alive = true
+            api('/context/status?sessionId=' + encodeURIComponent(id)).then(
+              (data) => {
+                if (!alive) return
+                if (data === null || data.marked !== 'plain') return
+                try {
+                  const sidebar = ctx.sidebarRight
+                  if (sidebar === null || sidebar === undefined || typeof sidebar !== 'object') return
+                  if (typeof sidebar.isExpanded !== 'function' || sidebar.isExpanded() !== true) return
+                  const active = typeof sidebar.active === 'function' ? sidebar.active() : undefined
+                  if (active === null || active === undefined || active.kind !== TAB_KIND) return
+                  if (typeof sidebar.close === 'function' && active.id !== undefined) sidebar.close(active.id)
+                  else if (typeof sidebar.toggleExpanded === 'function') sidebar.toggleExpanded()
+                } catch {
+                  // 收起失败不影响其它功能
+                }
+              },
+              () => {},
+            )
+            return () => { alive = false }
+          }, [props.sessionId])
           const [fontSize, setFontSize] = React.useState(() => {
             try {
               const stored = Number(window.localStorage.getItem('dsh-workbench:fontSize'))
