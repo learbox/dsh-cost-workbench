@@ -29,7 +29,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1
 
 .EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1 -VaultPath "D:\Obsidian\造价工作台"
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\seed-vault.ps1 -VaultPath "C:\你的Obsidian库\造价工作台"
 #>
 [CmdletBinding()]
 param(

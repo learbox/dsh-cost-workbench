@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     把「造价工作台」（dsh-cost-workbench）安装到 DeepSeek Harness。
@@ -97,7 +97,7 @@ function Show-ManualFallback([string]$reason, [string]$cliPath) {
     Write-Host '           - id: dsh-cost-workbench'
     Write-Host "             name: 'dsh-cost-workbench'"
     Write-Host '             config:'
-    Write-Host '               vaultRoot: "D:\Obsidian\造价工作台"'
+    Write-Host '               vaultRoot: "<你的 Obsidian 库或任意文件夹>\造价工作台"'
     Write-Host '               sopDir: "00 资料库"'
     Write-Host '               workbenchDir: "Workbench"'
     Write-Host '               recordingsDir: "会议记录"'
@@ -232,6 +232,7 @@ try {
     }
 
     if ($exitCode -ne 0) {
+        Write-Attention '如果这个插件之前已经装过，重复安装报错可以忽略：重启 App 即可生效。'
         Show-ManualFallback ('安装命令退出码为 ' + $exitCode + '（非 0）。') $DshCli
     }
 
@@ -241,8 +242,8 @@ try {
     Write-Host '      1. 完全退出 DeepSeek Harness（含托盘），再重新启动；'
     Write-Host '         不重启 App 的话，工作台不会挂上去。'
     Write-Host '      2. 打开任意会话，点标题右侧的造价工作台图标，或按 Alt+W。'
-    Write-Host '      3. 第一次打开会问 Obsidian 库路径，填：'
-    Write-Host '         D:\Obsidian\造价工作台'
+    Write-Host '      3. 第一次打开会问公共资料库路径，填你实际的 Obsidian 库或任意文件夹：'
+    Write-Host '         <你的 Obsidian 库或任意文件夹>\造价工作台'
     Write-Host '      4. 如果这个库还没建，先运行同目录的 seed-vault.ps1 生成种子内容。'
     Write-Host ''
     Write-Info '工作台数据留在 Obsidian 库与 C:\Users\<你>\.dsh-workbench 下，卸载不会删除。'
