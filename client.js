@@ -1502,6 +1502,7 @@ const WB_CALC = {
           if (sidebar === null || typeof sidebar !== 'object' || typeof sidebar.openResource !== 'function') return false
           try {
             sidebar.openResource(TAB_ADDRESS, { kind: TAB_KIND })
+            if (typeof currentSessionId === 'string' && currentSessionId !== '') userOpenedWorkbench.add(currentSessionId)
             return true
           } catch (error) {
             console.warn('[dsh-workbench] 右栏放不进标签，改用浮层：', error instanceof Error ? error.message : String(error))
@@ -1514,6 +1515,8 @@ const WB_CALC = {
          * 由 ⌥W 或侧栏放不进去时触发。比自建 document.body root 更稳。
          */
         const fullOverlay = { open: false, panelProps: {}, listeners: new Set() }
+        /** 本次运行中用户主动打开过工作台的会话：用来区分「用户点的」和「DSH 恢复的右栏布局」。 */
+        const userOpenedWorkbench = new Set()
         function emitOverlay() {
           for (const listener of fullOverlay.listeners) {
             try {
@@ -2032,8 +2035,8 @@ const WB_CALC = {
             }
           }, [activeId])
 
-          // 普通工作区（plain）完全静默：DSH 新建会话会沿用上次的右栏布局，
-          // 若右栏正显示工作台就自动收起，避免普通文件夹下也弹出面板。
+          // 非造价项目会话：如果右栏工作台是 DSH 恢复出来的（不是用户主动打开），自动收起。
+          // DSH 新建会话会沿用上次的右栏布局，未标记的普通文件夹也会因此弹出面板。
           React.useEffect(() => {
             const id = typeof props.sessionId === 'string' ? props.sessionId : ''
             if (id === '') return undefined
@@ -2041,7 +2044,9 @@ const WB_CALC = {
             api('/context/status?sessionId=' + encodeURIComponent(id)).then(
               (data) => {
                 if (!alive) return
-                if (data === null || data.marked !== 'plain') return
+                if (data === null || data === undefined) return
+                if (data.marked === 'project') return
+                if (userOpenedWorkbench.has(id)) return
                 try {
                   const sidebar = ctx.sidebarRight
                   if (sidebar === null || sidebar === undefined || typeof sidebar !== 'object') return
