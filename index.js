@@ -1324,7 +1324,12 @@ export function apply(ctx, config) {
         if (!info.isDirectory()) return writeError(res, 400, 'bad_path', '不是目录：' + target)
         const enable = body.enable !== false
         try {
-          await writeFile(join(target, PROJECT_MARKER), JSON.stringify({ project: enable, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+          const markFile = join(target, PROJECT_MARKER)
+          if (enable) {
+            await writeFile(markFile, JSON.stringify({ project: true, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+          } else {
+            await rm(markFile, { force: true })
+          }
         } catch (error) {
           return writeError(res, 500, 'mark_failed', '写项目标记失败：' + describe(error))
         }
@@ -1332,7 +1337,7 @@ export function apply(ctx, config) {
         return writeJson(res, 200, {
           ok: true,
           path: target,
-          marked: enable ? 'project' : 'plain',
+          marked: await readWorkspaceMarker(target),
           project: basename(target),
           initialized: layout.ok === true,
         })
@@ -1373,7 +1378,12 @@ export function apply(ctx, config) {
         const enable = body.enable === true
         try {
           const markFile = join(markTarget, PROJECT_MARKER)
-          await writeFile(markFile, JSON.stringify({ project: enable, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+          if (enable) {
+            await writeFile(markFile, JSON.stringify({ project: true, markedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
+          } else {
+            // 转为普通 = 删除标记文件，工作区回到干净的「未标记」状态
+            await rm(markFile, { force: true })
+          }
         } catch (error) {
           return writeError(res, 500, 'mark_failed', '写项目标记失败：' + describe(error))
         }
@@ -1383,7 +1393,7 @@ export function apply(ctx, config) {
         return writeJson(res, 200, {
           ok: true,
           workspace: markTarget,
-          marked: enable ? 'project' : 'plain',
+          marked: await readWorkspaceMarker(markTarget),
           project: stores.project,
           projectRoot: stores.projectRoot,
           initialized: layout.ok === true,

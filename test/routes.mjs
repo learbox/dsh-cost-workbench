@@ -304,11 +304,11 @@ try {
   check('会话1（项目）拿到项目资料库', Array.isArray(sopProject.json.tree) && sopProject.json.tree.some((node) => node.name === '项目资料库'), JSON.stringify((sopProject.json.tree ?? []).map((node) => node.name)))
   check('会话2（普通）不混入项目资料库', Array.isArray(sopPlain.json.tree) && sopPlain.json.tree.every((node) => node.name !== '项目资料库'), JSON.stringify((sopPlain.json.tree ?? []).map((node) => node.name)))
 
-  // 第一次询问选「普通工作区」：写标记 plain，不写目录
+  // 第一次询问选「普通工作区」：删除标记文件（不再写 project:false）
   const markPlain = await call('POST', '/context/mark', { enable: false })
-  check('标为普通工作区', markPlain.status === 200 && markPlain.json.marked === 'plain' && markPlain.json.project === '', markPlain.raw.slice(0, 160))
+  check('转为普通即删除标记（marked=none）', markPlain.status === 200 && markPlain.json.marked === 'none' && markPlain.json.project === '', markPlain.raw.slice(0, 160))
   check('普通工作区不写造价目录', await access(join(otherDir, '造价工作台')).then(() => false, () => true))
-  check('普通标记文件存在', await access(join(otherDir, '.dsh-cost-workbench.json')).then(() => true, () => false))
+  check('转为普通后标记文件已删除', await access(join(otherDir, '.dsh-cost-workbench.json')).then(() => false, () => true))
 
   // 反悔：改成造价项目 → 立即初始化目录
   const markProject = await call('POST', '/context/mark', { enable: true })

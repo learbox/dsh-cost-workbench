@@ -2048,7 +2048,7 @@ const WB_CALC = {
                 if (data.marked === 'project') return
                 if (userOpenedWorkbench.has(id)) return
                 try {
-                  const sidebar = ctx.sidebarRight
+                  const sidebar = getService('sidebarRight')
                   if (sidebar === null || sidebar === undefined || typeof sidebar !== 'object') return
                   if (typeof sidebar.isExpanded !== 'function' || sidebar.isExpanded() !== true) return
                   const active = typeof sidebar.active === 'function' ? sidebar.active() : undefined
