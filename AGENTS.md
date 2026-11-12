@@ -27,7 +27,7 @@ lib/
                    返回里按 `auc` / `sauc` 分开汇总，界面角标显示「录音 xh 流式 xh」。
 test/              node test/all.mjs
 locale/            zh / en 显示名
-scripts/           install.ps1（装机）、seed-vault.ps1（建库与种子数据）
+scripts/           install.ps1（装机，-Uninstall 卸载）、seed-vault.ps1（建库与种子数据）
 ```
 
 数据：项目数据（资料库笔记、会议记录、三张表）跟在 DSH 会话的工作区里；公共资料库（术语表、

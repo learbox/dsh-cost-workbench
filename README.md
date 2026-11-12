@@ -227,13 +227,20 @@ C:\Users\<你>\.dsh-workbench\asr.json        可选的语音转写凭据（不�
 
 ## 卸载
 
-插件可以从 设置 → 插件 里停用或移除；也可以：
+插件可以从 设置 → 插件 里停用或移除；也可以用安装脚本的卸载模式（会调用 `dsh plugin remove`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Uninstall
+```
+
+或者手动执行：
 
 ```powershell
 & "C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop remove dsh-cost-workbench
 ```
 
-卸载**不会删除**你的 Obsidian 库、`cards.json`、`prompts.json`、三张表、术语表与会议记录。
+卸载**不会删除**你的 Obsidian 库、`cards.json`、`prompts.json`、三张表、术语表与会议记录；也不会删除
+项目里的 `造价工作台/`、`会议记录/` 与 `.dsh-cost-workbench.json`。要彻底清理请手动删除这些目录。
 
 ## Windows 已知限制
 

@@ -25,18 +25,26 @@
 .PARAMETER SkipProcessCheck
     跳过「App 是否已退出」的检查（仅用于在别的机器上预演，不推荐）。
 
+.PARAMETER Uninstall
+    卸载模式：从 profile 里移除 dsh-cost-workbench（dsh plugin remove），不删除任何数据
+    （Obsidian 库、~/.dsh-workbench、项目里的造价工作台/会议记录都不会动）。
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile web
+
+.EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Uninstall
 #>
 [CmdletBinding()]
 param(
     [string]$Profile = 'desktop',
     [string]$PluginDir = '',
     [string]$DshCli = '',
-    [switch]$SkipProcessCheck
+    [switch]$SkipProcessCheck,
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -140,6 +148,57 @@ try {
         Write-Pass '没有检测到运行中的 DeepSeek Harness 进程。'
     } else {
         Write-Attention '已跳过进程检查（-SkipProcessCheck）。请自行确认 App 已完全退出。'
+    }
+
+    # ---------------------------------------------------------- 卸载分支
+    if ($Uninstall) {
+        Write-Section '卸载工作台插件（dsh plugin remove）'
+        if ([string]::IsNullOrWhiteSpace($DshCli)) {
+            $candidates = @()
+            if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+                $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd')
+            }
+            if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+                $candidates += (Join-Path $env:USERPROFILE 'AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd')
+            }
+            foreach ($candidate in $candidates) {
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    $DshCli = $candidate
+                    break
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($DshCli)) {
+                $found = Get-Command 'dsh.cmd' -ErrorAction SilentlyContinue
+                if ($null -ne $found) {
+                    $DshCli = [string]$found.Source
+                }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($DshCli) -or -not (Test-Path -LiteralPath $DshCli -PathType Leaf)) {
+            Write-Fail '找不到 dsh.cmd，请用 -DshCli 指定它的完整路径。'
+            exit 1
+        }
+        $removeArgs = @('plugin', '--profile', $Profile, 'remove', 'dsh-cost-workbench')
+        Write-Info ('命令：& "' + $DshCli + '" ' + ($removeArgs -join ' '))
+        Write-Host ''
+        $removeCode = 1
+        try {
+            & $DshCli @removeArgs
+            $removeCode = $LASTEXITCODE
+        } catch {
+            Write-Fail ('调用 CLI 时出错：' + $_.Exception.Message)
+        }
+        if ($removeCode -ne 0) {
+            Write-Attention '如果插件本来就没安装，remove 报错可以忽略。'
+        }
+        Write-Host ''
+        Write-Host '    卸载已完成（重启 App 后生效）。以下数据不会被删除：' -ForegroundColor Yellow
+        Write-Host '      - Obsidian 库 / 公共资料库目录'
+        Write-Host '      - %USERPROFILE%\.dsh-workbench（配置与语音凭据）'
+        Write-Host '      - 项目里的 造价工作台\ 、会议记录\ 与 .dsh-cost-workbench.json'
+        Write-Host '    如需彻底清理，请手动删除以上目录（注意先备份）。'
+        Write-Host ''
+        exit 0
     }
 
     # ------------------------------------------------------ 2. 解析插件源码目录
