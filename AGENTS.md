@@ -127,7 +127,7 @@ DELETE /api/dsh-workbench/<table>/:id    删除
 
 | Slot | Key | 用途 |
 |---|---|---|
-| `conversation.session.header.actions` | id `dsh-workbench` | 会话标题旁的图标按钮 |
+| `conversation.session.header.actions` | id `dsh-workbench` | 会话标题旁的图标按钮；开关语义：右栏已显示工作台时点击收起（`sidebarRight.isExpanded()` + `active().kind === TAB_KIND` + `toggleExpanded()`），否则打开 |
 | `conversation.hero.options` | id `dsh-workbench` | 空会话输入框上方的入口 |
 | `sidebar.right.pane.tab` | key `dsh-workbench.panel` | 右侧栏里的面板主体 |
 | `shell.overlay` | id `dsh-workbench-full` | 放不进右侧栏时的浮层（快捷键 `Alt+W` / `⌥W`） |

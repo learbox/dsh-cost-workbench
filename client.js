@@ -1537,6 +1537,33 @@ const WB_CALC = {
           else openFullWorkbench(activeSession.panelProps)
         }
 
+        /**
+         * 头部按钮的开关语义：右栏正在显示工作台 → 收起；浮层开着 → 关闭；
+         * 其它情况 → 打开（右栏优先，放不进去再开浮层）。
+         */
+        function toggleWorkbench(props) {
+          if (fullOverlay.open) {
+            closeFullWorkbench()
+            return
+          }
+          const sidebar = getService('sidebarRight')
+          if (sidebar !== null && typeof sidebar === 'object') {
+            try {
+              if (typeof sidebar.isExpanded === 'function' && sidebar.isExpanded() === true) {
+                const active = typeof sidebar.active === 'function' ? sidebar.active() : undefined
+                if (active !== null && active !== undefined && active.kind === TAB_KIND
+                  && typeof sidebar.toggleExpanded === 'function') {
+                  sidebar.toggleExpanded()
+                  return
+                }
+              }
+            } catch {
+              // 收起失败时按打开处理
+            }
+          }
+          if (!placeInSidebar()) openFullWorkbench(props)
+        }
+
         /** 最近一次渲染的会话信息：快捷键呼出时用它拿到 sessionId 与输入框能力。 */
         const activeSession = { sessionId: null, panelProps: {} }
         /**
@@ -1735,7 +1762,7 @@ const WB_CALC = {
               className: 'dsh-wb-btn dsh-wb-icon-btn',
               title: t('header.open'),
               'aria-label': t('header.open'),
-              onClick: () => { if (!placeInSidebar()) openFullWorkbench(props) },
+              onClick: () => { toggleWorkbench(props) },
             },
             h(Icon, null),
           )
@@ -1756,7 +1783,7 @@ const WB_CALC = {
               type: 'button',
               className: 'dsh-wb-btn',
               title: t('header.open'),
-              onClick: () => { if (!placeInSidebar()) openFullWorkbench(props) },
+              onClick: () => { toggleWorkbench(props) },
             },
             h(Icon, { size: 14 }),
             h('span', { style: { marginLeft: '2px' } }, t('tab.title')),
