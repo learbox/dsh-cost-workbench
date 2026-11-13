@@ -253,7 +253,10 @@ async function openExternal(command, target) {
   }
   if (process.platform === 'win32') {
     const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(target)
-    const handler = schemeMatch === null ? null : await readProtocolCommand(schemeMatch[1])
+    const scheme = schemeMatch === null ? '' : schemeMatch[1].toLowerCase()
+    // http/https 用系统默认浏览器打开：不查注册表处理器、也不校验子进程退出码
+    // （浏览器已有实例时会把 URL 转发给现有实例并立即退出，退出码常为非 0）。
+    const handler = scheme === '' || scheme === 'http' || scheme === 'https' ? null : await readProtocolCommand(scheme)
     if (handler !== null) {
       await new Promise((resolve, reject) => {
         try {
